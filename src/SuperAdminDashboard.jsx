@@ -24,9 +24,9 @@ const mapComplaint = (c) => {
     role: `Partner at ${storeNames}` || '—',
     date: new Date(c.created_at),
     status: backendToUiStatus(c.status),
+    photoUrl: c.photo_url || null, // <-- REMOVED THE **
   };
 };
-
 const mapOrderData = (apiData) => {
   if (!apiData) return [];
   return apiData.map(item => ({
@@ -227,7 +227,9 @@ const SuperAdminDashboard = () => {
   const [currentComplaintId, setCurrentComplaintId] = useState(null);
   const [solutionText, setSolutionText] = useState('');
   const [resolvingComplaint, setResolvingComplaint] = useState(false); 
-  
+  // ... near other useState hooks
+  const [isPartnerDetailsModalVisible, setIsPartnerDetailsModalVisible] = useState(false);
+  const [selectedPartnerForDetails, setSelectedPartnerForDetails] = useState(null);
   // --- Report Management States ---
   const [reports, setReports] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null); 
@@ -876,6 +878,126 @@ const handleReportDownload = async (reportId) => {
             setLoading(false);
         }
     };
+    const PartnerDetailsModal = ({ isVisible, onClose, onApprove, partner, isLoading, modalStyles }) => {
+    if (!isVisible || !partner) return null;
+
+    // Helper function to render a detail item
+    const DetailItem = ({ label, value }) => (
+        <div style={styles.detailItem}>
+            <p style={styles.detailLabel}>{label}:</p>
+            <p style={styles.detailValue}>{value || 'N/A'}</p>
+        </div>
+    );
+
+    // Helper function to render an image
+    const DetailImage = ({ label, imageUrl }) => (
+        <div style={styles.imageItem}>
+            <p style={styles.detailLabel}>{label}</p>
+            {imageUrl ? (
+                <a href={`${API_BASE_URL}/${imageUrl}`} target="_blank" rel="noopener noreferrer">
+                    <img 
+                        src={`${API_BASE_URL}/${imageUrl}`} 
+                        alt={label} 
+                        style={styles.detailImage} 
+                    />
+                </a>
+            ) : (
+                <p style={styles.detailValue}>No Image Uploaded</p>
+            )}
+        </div>
+    );
+
+    return (
+        <div style={modalStyles.backdrop}>
+            <div style={{ ...modalStyles.modal, width: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+                <h3 style={modalStyles.title}>Partner Approval Details</h3>
+                <p style={styles.modalSubtitle}>Reviewing: **{partner.full_name}** ({partner.email})</p>
+
+                <div style={styles.detailsGrid}>
+                    {/* Column 1: Personal & Vehicle Details */}
+                    <div style={styles.detailsColumn}>
+                        <DetailItem label="Full Name" value={partner.full_name} />
+                        <DetailItem label="Email" value={partner.email} />
+                        <DetailItem label="Mobile" value={partner.mobile_number} />
+                        <DetailItem label="Address" value={`${partner.current_address}, ${partner.city}, ${partner.state}`} />
+                        <DetailItem label="Vehicle No." value={partner.vehicle_number} />
+                        <DetailItem label="Driving License" value={partner.driving_license_number} />
+                        <DetailItem label="Govt ID Type" value={partner.id_type} />
+                        <DetailItem label="Govt ID No." value={partner.govt_id} />
+                    </div>
+
+                    {/* Column 2: Images */}
+                    <div style={styles.detailsColumn}>
+                        {/*                          * IMPORTANT: I am assuming your API returns image paths as 
+                         * 'govt_id_photo_url' and 'delivery_photo_url'. 
+                         * Please check your API response and change these field names if they are different!
+                        */}
+                        <DetailImage label="Government ID Photo" imageUrl={partner.govt_id_photo_url} />
+                        <DetailImage label="Delivery Partner Photo" imageUrl={partner.delivery_photo_url} />
+                    </div>
+                </div>
+                
+                <div style={modalStyles.actions}>
+                    <button type="button" onClick={onClose} style={modalStyles.cancelButton} disabled={isLoading}>
+                        Cancel
+                    </button>
+                    <button 
+                        type="button" 
+                        style={modalStyles.submitButton} 
+                        disabled={isLoading}
+                        onClick={() => onApprove(partner.id)}
+                    >
+                        {isLoading ? 'Approving...' : 'Approve Partner'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const handleViewPartnerDetails = (partner) => {
+    setSelectedPartnerForDetails(partner);
+    setIsPartnerDetailsModalVisible(true);
+  };
+
+  const handleApprovePartner = async (partnerId) => {
+    if (!accessToken) {
+        alert("Authentication token is missing. Please re-login.");
+        return;
+    }
+    if (!window.confirm(`Are you sure you want to approve this partner (ID: ${partnerId})?`)) {
+        return;
+    }
+
+    setLoading(true); // Use the general loading state
+    try {
+        // IMPORTANT: I am assuming this API endpoint. You may need to change it.
+        const response = await axios.patch(
+            `${API_BASE_URL}/partners/partners/superadmin/approve-delivery-partner/${partnerId}`,
+            { status: 'approved' }, // Or 'active', depending on your backend logic
+            {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                },
+            }
+        );
+
+        if (response.status === 200) {
+            alert('Partner approved successfully!');
+            setIsPartnerDetailsModalVisible(false); // Close the modal
+            setSelectedPartnerForDetails(null);
+            await fetchAllData(); // Refresh all data
+        } else {
+            throw new Error(response.data?.message || `Server responded with status ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Partner approval failed:', error.response?.data || error.message);
+        alert(`Failed to approve partner: ${error.response?.data?.detail || error.message}`);
+    } finally {
+        setLoading(false);
+    }
+  };
 
     const handleAssignBottlesToPartner = async (deliveryPartnerId) => {
         if (!accessToken) {
@@ -1305,27 +1427,41 @@ const handleReportDownload = async (reportId) => {
               <tr style={styles.tableHeaderRow}>
                 <th style={styles.tableHeaderCell}>Name</th>
                 <th style={styles.tableHeaderCell}>Email</th>
+              {/* --- ADDED THIS HEADER --- */}
+                <th style={styles.tableHeaderCell}>Mobile</th> 
                 <th style={styles.tableHeaderCell}>Actions</th>
               </tr>
                 </thead>
             <tbody>
-              {pendingPartners.map((dp) => (
+             {/* --- MODIFIED THIS SECTION --- */}
+              {pendingPartners.length > 0 ? pendingPartners.map((dp) => (
                 <tr key={dp.id} style={styles.tableRow}>
                   <td style={styles.tableCell}>{dp.full_name}</td>
                   <td style={styles.tableCell}>{dp.email}</td>
+                {/* --- ADDED THIS CELL --- */}
+                  <td style={styles.tableCell}>{dp.mobile_number || 'N/A'}</td>
                   <td style={styles.tableCell}>
-                    <button style={styles.actionButton} onClick={() => alert(`Approve ${dp.full_name}`)}>
-                      Approve
+                  {/* --- FIXED THIS BUTTON --- */}
+                    <button 
+                        style={styles.actionButton} 
+                        onClick={() => handleViewPartnerDetails(dp)}
+                    >
+                      View & Approve
                     </button>
                   </td>
                 </tr>
-              ))}
+              )) : (
+                <tr style={styles.tableRow}>
+                  <td colSpan="4" style={{...styles.tableCell, textAlign: 'center'}}>No pending partners.</td>
+                </tr>
+              )}
+             {/* --- END OF FIX --- */}
             </tbody>
           </table>
         </div>
   
         <div style={{ ...styles.tableCard, marginTop: '30px' }}>
-          <h3 style={styles.cardTitle}>All Delivery Partners ({activePartners.length})</h3>
+          <h3 style={styles.cardTitle}>Active Delivery Partners ({activePartners.length})</h3>
           <table style={styles.dataTable}>
             <thead>
               <tr style={styles.tableHeaderRow}>
@@ -1335,16 +1471,20 @@ const handleReportDownload = async (reportId) => {
               </tr>
                 </thead>
             <tbody>
-              {activePartners.map((dp) => (
+              {activePartners.length > 0 ? activePartners.map((dp) => (
                 <tr key={dp.id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>{dp.full_name}</td>
+                _ <td style={styles.tableCell}>{dp.full_name}</td>
                   <td style={styles.tableCell}>{dp.email}</td>
                   <td style={styles.tableCell}>
                     <span style={{...styles.activityStatusBadge, backgroundColor: '#10B981'}}>{dp.status}</span>
                   </td>
                 </tr>
-              ))}
-            </tbody>
+              )) : (
+                <tr style={styles.tableRow}>
+                  <td colSpan="3" style={{...styles.tableCell, textAlign: 'center'}}>No active partners.</td>
+                </tr>
+              )}
+    _       </tbody>
           </table>
         </div>
         </div>
@@ -1373,26 +1513,51 @@ const handleReportDownload = async (reportId) => {
                 <tr key={complaint.id} style={styles.tableRow}>
                   <td style={styles.tableCell}>{complaint.id}</td>
                   <td style={styles.tableCell}>{complaint.subject}</td>
-                  <td style={styles.tableCell}>{complaint.description}</td>
+                  <td style={styles.tableCell}>
+                    {/* Show the description text */}
+                    {complaint.description}
+                    
+                    {/* --- START: ADDED IMAGE LINK --- */}
+                    {/* If a photoUrl exists, show a "View Image" button */}
+                    {complaint.photoUrl && (
+                      <div style={{ marginTop: '10px' }}>
+                        <a
+                          // Construct the full URL by combining API_BASE_URL and the photoUrl
+                          href={`${API_BASE_URL}/${complaint.photoUrl}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          // Use existing styles to make it look like a button
+                          style={{
+                            ...styles.actionButton,
+                            backgroundColor: '#6c757d', // A neutral gray color
+                            textDecoration: 'none'
+                          }}
+                  D     >
+                          📷 View Attached Image
+                        </a>
+                      </div>
+                    )}
+                    {/* --- END: ADDED IMAGE LINK --- */}
+                  </td>
                   <td style={styles.tableCell}>{complaint.customerName} ({complaint.role})</td>
                   <td style={styles.tableCell}>{complaint.date.toLocaleDateString()}</td>
                   <td style={styles.tableCell}>
                     <span style={{
-                      ...styles.activityStatusBadge, 
-                      backgroundColor: complaint.status === 'Resolved' ? '#4CAF50' : 
+                      ...styles.activityStatusBadge,
+                      backgroundColor: complaint.status === 'Resolved' ? '#4CAF50' :
                                        complaint.status === 'In Progress' ? '#2196F3' : '#FF9800'
-                    }}>
+                  }}>
                       {complaint.status}
                     </span>
                   </td>
                   <td style={styles.tableCell}>
-                    {complaint.status === 'New' && (
-                      <button 
-                            style={styles.actionButton} 
+What                {complaint.status === 'New' && (
+                      <button
+                            style={styles.actionButton}
                             onClick={() => handleResolveClick(complaint.id)}
                         >
                         Resolve
-                      </button>
+s                 </button>
                     )}
                   </td>
                 </tr>
@@ -1403,7 +1568,6 @@ const handleReportDownload = async (reportId) => {
         </div>
     );
   };
-
   const renderReports = () => {
     
     const handleReportDownloadLocal = (reportId) => {
@@ -1708,7 +1872,8 @@ const renderActiveStoresList = () => {
           )}
         </div>
       </main>
-      {/* MODAL RENDERED HERE */}
+      
+      {/* --- MODAL SECTION --- */}
       <SolutionModal 
         isVisible={isSolutionModalVisible}
         onClose={handleCloseModal}
@@ -1718,6 +1883,26 @@ const renderActiveStoresList = () => {
         setSolutionText={setSolutionText}
         isLoading={resolvingComplaint}
         modalStyles={styles.modalStyles} 
+      />
+
+      {/* --- QR ASSIGN BOTTLE MODAL --- */}
+      <AssignBottleModal 
+          isVisible={qrAssigning}
+          onClose={() => setQrAssigning(false)}
+          selectedBottlesToAssign={selectedBottlesToAssign}
+          approvedDeliveryPartners={approvedDeliveryPartners}
+          onAssign={handleAssignBottlesToPartner}
+          modalStyles={styles.modalStyles}
+      />
+
+      {/* --- NEW PARTNER DETAILS MODAL --- */}
+      <PartnerDetailsModal
+        isVisible={isPartnerDetailsModalVisible}
+        onClose={() => setIsPartnerDetailsModalVisible(false)}
+        onApprove={handleApprovePartner}
+        partner={selectedPartnerForDetails}
+        isLoading={loading}
+        modalStyles={styles.modalStyles}
       />
     </div>
   );
@@ -2251,12 +2436,56 @@ const styles = {
         cursor: 'pointer',
     }
   },
-    modalSubtitle: {
-        fontSize: '14px',
+modalSubtitle: {
+        fontSize: '16px',
         color: '#6B7280',
-        marginBottom: '10px',
-        textAlign: 'center',
-    }
+        marginBottom: '20px',
+        textAlign: 'left',
+        borderBottom: '1px solid #EEE',
+        paddingBottom: '15px'
+  },
+  detailsGrid: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: '20px',
+  },
+  detailsColumn: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  detailItem: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  detailLabel: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: '#555',
+    margin: '0 0 4px 0',
+  },
+  detailValue: {
+    fontSize: '15px',
+    color: '#333',
+    margin: '0',
+    wordBreak: 'break-word',
+  },
+  imageItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '5px',
+  },
+  detailImage: {
+    width: '100%',
+    maxWidth: '250px',
+    height: 'auto',
+    borderRadius: '8px',
+    border: '1px solid #DDD',
+    backgroundColor: '#F8F8F8',
+  }
+    
 };
+
  
 export default SuperAdminDashboard;

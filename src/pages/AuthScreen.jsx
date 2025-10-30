@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-// 1. 🟢 Import the image using the specified file name
-import loginBackgroundImage from "../assets/images/aquatrack_visual.png"; // Assuming AuthScreen is in `src/` or a sibling folder to `assets`. Adjust the relative path as needed.
+
+// Using a publicly accessible URL for the image to prevent module resolution errors.
+const LOGIN_BACKGROUND_IMAGE_URL = 'https://user-gen-media-assets.s3.amazonaws.com/seedream_images/0f5b0114-24a6-420f-9d7b-27fa48a799f5.png';
 
 const API_BASE_URL = 'https://aquatrack-backend.fly.dev'; // Your local backend URL
 
@@ -32,7 +33,7 @@ const AuthScreen = () => {
 
       const { access_token, user_role } = response.data;
 
-      // 🟢 CRITICAL FIX: Use a conditional key to store the token.
+      // Use a conditional key to store the token.
       const tokenKey = user_role === 'superadmin' ? 'userToken' : 'partner_token';
       localStorage.setItem(tokenKey, access_token);
 
@@ -53,13 +54,6 @@ const AuthScreen = () => {
 
   return (
     <div style={authStyles.container}>
-      {/* The image is now a background on this div for better styling control.
-        We have removed the <img /> tag entirely.
-      */}
-      <div style={authStyles.imageSection}>
-        {/* The image is now a background, so no content is needed here */}
-      </div>
-
       <div style={authStyles.formSection}>
         <form onSubmit={handleLogin} style={authStyles.formBox}>
           <div style={authStyles.roleSelectionTabs}>
@@ -78,11 +72,8 @@ const AuthScreen = () => {
               Partner (Store/POC)
             </button>
           </div>
-
           <h2 style={authStyles.formTitle}>Welcome back! Please login to your {displayRole} account</h2>
-
           {error && <p style={authStyles.errorText}>{error}</p>}
-
           <div style={authStyles.form}>
             <input
               type="email"
@@ -100,14 +91,12 @@ const AuthScreen = () => {
               style={authStyles.input}
               required
             />
-
             <div style={authStyles.optionsRow}>
               <label style={authStyles.checkboxLabel}>
                 <input type="checkbox" style={authStyles.checkbox} /> Remember me
               </label>
               <a href="#" style={authStyles.forgotPassword}>Forgot password?</a>
             </div>
-
             <button type="submit" style={authStyles.loginButton} disabled={loading}>
               {loading ? 'Logging in...' : 'Login'}
             </button>
@@ -123,37 +112,25 @@ const authStyles = {
     display: 'flex',
     minHeight: '100vh',
     fontFamily: 'Arial, sans-serif',
-    // 🎨 Updated: Use a solid color as the container background
-    backgroundColor: '#1E1E2F',
-    color: '#fff',
-  },
-  imageSection: {
-    flex: 3,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    // 2. 🟢 Updated: Use the imported variable for the background image URL
-    backgroundImage: `url(${loginBackgroundImage})`,
+    // Use the public URL for the background image
+    backgroundImage: `url(${LOGIN_BACKGROUND_IMAGE_URL})`,
     backgroundSize: 'cover',
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
-    padding: '20px',
-    boxSizing: 'border-box',
-
+    color: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   formSection: {
-    flex: 2,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     padding: '40px',
     boxSizing: 'border-box',
-    // 🎨 New: Shift the form section to the right to reveal the logo
-    transform: 'translateX(50px)',
+    width: '100%',
   },
   formBox: {
-    // 🎨 Updated: Changed the background to a more transparent blue-like color
-    backgroundColor: 'rgba(0, 191, 255, 0.2)',
+    backgroundColor: 'rgba(30, 30, 47, 0.8)',
     backdropFilter: 'blur(10px)',
     border: '1px solid rgba(255, 255, 255, 0.1)',
     borderRadius: '15px',
@@ -189,8 +166,7 @@ const authStyles = {
   formTitle: {
     fontSize: '1.2rem',
     fontWeight: 'normal',
-    // 🎨 Updated: Changed the text color to a darker blue
-    color: '#005b9f',
+    color: '#fff',
     marginBottom: '30px',
     textAlign: 'center',
   },
@@ -206,14 +182,10 @@ const authStyles = {
     border: '1px solid rgba(255, 255, 255, 0.2)',
     borderRadius: '8px',
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    // 🎨 Updated: Changed the input text color to a darker blue
-    color: '#005b9f',
+    color: '#fff',
     fontSize: '1rem',
     outline: 'none',
     boxSizing: 'border-box',
-    '::placeholder': {
-      color: 'rgba(0, 0, 0, 0.6)',
-    },
   },
   optionsRow: {
     display: 'flex',
@@ -225,8 +197,7 @@ const authStyles = {
     fontSize: '0.9rem',
   },
   checkboxLabel: {
-    // 🎨 Updated: Changed the checkbox label color to a darker blue
-    color: '#005b9f',
+    color: 'rgba(255, 255, 255, 0.7)',
     display: 'flex',
     alignItems: 'center',
     gap: '5px',
