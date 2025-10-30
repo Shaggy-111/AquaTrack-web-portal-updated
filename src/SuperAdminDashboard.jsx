@@ -1492,82 +1492,97 @@ const handleViewPartnerDetails = (partner) => {
   };
 
   const renderComplaints = () => {
-    return (
-      <div style={styles.contentArea}>
-        <h2 style={styles.pageTitle}>Complaints Management</h2>
-        <div style={styles.tableCard}>
-          <table style={styles.dataTable}>
-            <thead>
-              <tr style={styles.tableHeaderRow}>
-                <th style={styles.tableHeaderCell}>ID</th>
-                <th style={styles.tableHeaderCell}>Subject</th>
-                <th style={styles.tableHeaderCell}>Description</th>
-                <th style={styles.tableHeaderCell}>Raised By</th>
-                <th style={styles.tableHeaderCell}>Date</th>
-                <th style={styles.tableHeaderCell}>Status</th>
-                <th style={styles.tableHeaderCell}>Actions</th>
-              </tr>
-                </thead>
-            <tbody>
-              {complaints.map((complaint) => (
-                <tr key={complaint.id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>{complaint.id}</td>
-                  <td style={styles.tableCell}>{complaint.subject}</td>
-                  <td style={styles.tableCell}>
-                    {/* Show the description text */}
-                    {complaint.description}
-                    
-                    {/* --- START: ADDED IMAGE LINK --- */}
-                    {/* If a photoUrl exists, show a "View Image" button */}
-                    {complaint.photoUrl && (
-                      <div style={{ marginTop: '10px' }}>
-                        <a
-                          // Construct the full URL by combining API_BASE_URL and the photoUrl
-                          href={`${API_BASE_URL}/${complaint.photoUrl}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          // Use existing styles to make it look like a button
-                          style={{
-                            ...styles.actionButton,
-                            backgroundColor: '#6c757d', // A neutral gray color
-                            textDecoration: 'none'
-                          }}
-                  D     >
-                          📷 View Attached Image
-                        </a>
-                      </div>
-                    )}
-                    {/* --- END: ADDED IMAGE LINK --- */}
-                  </td>
-                  <td style={styles.tableCell}>{complaint.customerName} ({complaint.role})</td>
-                  <td style={styles.tableCell}>{complaint.date.toLocaleDateString()}</td>
-                  <td style={styles.tableCell}>
-                    <span style={{
-                      ...styles.activityStatusBadge,
-                      backgroundColor: complaint.status === 'Resolved' ? '#4CAF50' :
-                                       complaint.status === 'In Progress' ? '#2196F3' : '#FF9800'
-                  }}>
-                      {complaint.status}
-                    </span>
-                  </td>
-                  <td style={styles.tableCell}>
-What                {complaint.status === 'New' && (
-                      <button
-                            style={styles.actionButton}
-                            onClick={() => handleResolveClick(complaint.id)}
-                        >
-                        Resolve
-s                 </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            </table>
-        </div>
-        </div>
-    );
-  };
+  return (
+    <div style={styles.contentArea}>
+      <h2 style={styles.pageTitle}>Complaints Management</h2>
+      <div style={styles.tableCard}>
+        <table style={styles.dataTable}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={styles.tableHeaderCell}>ID</th>
+              <th style={styles.tableHeaderCell}>Subject</th>
+              <th style={styles.tableHeaderCell}>Description</th>
+              <th style={styles.tableHeaderCell}>Raised By</th>
+              <th style={styles.tableHeaderCell}>Date</th>
+              <th style={styles.tableHeaderCell}>Status</th>
+              <th style={styles.tableHeaderCell}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {complaints.length > 0 ? (
+              complaints.map((complaint) => (
+                <tr key={complaint.id} style={styles.tableRow}>
+                  <td style={styles.tableCell}>{complaint.id}</td>
+                  <td style={styles.tableCell}>{complaint.subject}</td>
+                  <td style={styles.tableCell}>
+                    {complaint.description}
+                    {complaint.photoUrl && (
+                      <div style={{ marginTop: '10px' }}>
+                        <a
+                          href={`${API_BASE_URL}/${complaint.photoUrl}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            ...styles.actionButton,
+                            backgroundColor: '#6c757d',
+                            textDecoration: 'none'
+                          }}
+                        >
+                          📷 View Attached Image
+                        </a>
+                      </div>
+                    )}
+                  </td>
+                  <td style={styles.tableCell}>
+                    {complaint.customerName} ({complaint.role})
+                  </td>
+                  <td style={styles.tableCell}>
+                    {complaint.date.toLocaleDateString()}
+                  </td>
+                  <td style={styles.tableCell}>
+                    <span
+                      style={{
+                        ...styles.activityStatusBadge,
+                        backgroundColor:
+                          complaint.status === 'Resolved'
+                            ? '#4CAF50'
+                            : complaint.status === 'In Progress'
+                            ? '#2196F3'
+                            : '#FF9800'
+                      }}
+                    >
+                      {complaint.status}
+                    </span>
+                  </td>
+                  <td style={styles.tableCell}>
+                    {complaint.status === 'New' && (
+                      <button
+                        style={styles.actionButton}
+                        onClick={() => handleResolveClick(complaint.id)}
+                      >
+                        Resolve
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr style={styles.tableRow}>
+                <td
+                  colSpan="7"
+                  style={{ ...styles.tableCell, textAlign: 'center' }}
+                >
+                  No new complaints found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
   const renderReports = () => {
     
     const handleReportDownloadLocal = (reportId) => {
