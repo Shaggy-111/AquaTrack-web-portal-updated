@@ -627,25 +627,32 @@ const handleApproveOrder = async (orderId) => {
     setLoading(true);
     try {
         const response = await axios.patch(
+            // Ensure the URL is exactly correct:
             `${API_BASE_URL}/superadmin/orders/${orderId}/approve`,
             {},
             { headers: { 'Authorization': `Bearer ${accessToken}` } }
         );
 
-        if (response.status === 200) {
+        // --- 🌟 CRITICAL FIX HERE 🌟 ---
+        // Change from response.status === 200 to check for any 2xx status code.
+        // This is necessary if the API returns 202 or 204 on successful PATCH.
+        if (response.status >= 200 && response.status < 300) { 
             alert(`Order ${orderId} approved and is now ready for assignment.`);
-            fetchAllData(); // Refresh all data to update the UI
+            // Refreshing all data is the safest way to update the UI
+            fetchAllData(); 
         } else {
+            // This 'else' block is unlikely to run with axios for non-2xx codes,
+            // but kept for robustness.
             throw new Error(response.data?.detail || `Server responded with status ${response.status}`);
         }
     } catch (error) {
+        // Axios catches all non-2xx status codes (like 401, 403, 500) here.
         console.error('Order approval failed:', error.response?.data || error.message);
         alert(`Failed to approve order: ${error.response?.data?.detail || error.message}`);
     } finally {
         setLoading(false);
     }
 };
-
 // ------------------------------------------
 // --- ORDER ASSIGNMENT HANDLERS ---
 // ------------------------------------------
