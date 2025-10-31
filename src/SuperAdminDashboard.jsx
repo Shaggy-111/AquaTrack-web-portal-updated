@@ -619,32 +619,37 @@ const handleExportOrdersToExcel = () => {
 // ------------------------------------------
 // --- ORDER APPROVAL HANDLER ---
 // ------------------------------------------
-const handleApproveOrder = async (orderId) => {
-  if (!accessToken) {
-    alert('Authentication token not found. Please log in.');
-    return;
-  }
-
-  setLoading(true);
-  try {
-    const response = await axios.patch(
-      `${API_BASE_URL}/superadmin/orders/${orderId}/approve`,
-      {},
-      { headers: { 'Authorization': `Bearer ${accessToken}` } }
-    );
-
-    if (response.status >= 200 && response.status < 300) {
-      alert(`Order ${orderId} approved and is now ready for assignment.`);
-      fetchAllData();
-    } else {
-      throw new Error(response.data?.detail || `Server responded with status ${response.status}`);
+// ------------------------------------------
+// --- DELIVERY PARTNER APPROVAL HANDLER ---
+// ------------------------------------------
+const handleApproveDeliveryPartner = async (dpId) => {
+    if (!accessToken) {
+        alert('Authentication token not found. Please log in again.');
+        return;
     }
-  } catch (error) {
-    console.error('Order approval failed:', error.response?.data || error.message);
-    alert(`Failed to approve order: ${error.response?.data?.detail || error.message}`);
-  } finally {
-    setLoading(false);
-  }
+
+    setLoading(true);
+    try {
+        const response = await axios.patch(
+            `${API_BASE_URL}/partners/partners/superadmin/delivery-partners/${dpId}/approve`,
+            {},
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+
+        // ✅ Handle any 2xx success code (200, 202, 204 etc.)
+        if (response.status >= 200 && response.status < 300) {
+            alert(`Delivery Partner ID ${dpId} approved successfully.`);
+            // Refresh dashboard data to reflect update
+            fetchAllData();
+        } else {
+            throw new Error(`Unexpected server status: ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Delivery Partner approval failed:', error.response?.data || error.message);
+        alert(`Failed to approve delivery partner: ${error.response?.data?.detail || error.message}`);
+    } finally {
+        setLoading(false);
+    }
 };
 
 
@@ -1569,83 +1574,101 @@ const handleViewPartnerDetails = (partner) => {
   };
 
   const renderDeliveryPartners = () => {
-    const pendingPartners = allDeliveryPartners.filter(dp => dp.status === 'pending');
-    const activePartners = allDeliveryPartners.filter(dp => dp.status === 'active' || dp.status === 'approved');
-  
-    return (
-      <div style={styles.contentArea}>
-        <h2 style={styles.pageTitle}>Delivery Partners</h2>
-  
-        <div style={styles.tableCard}>
-          <h3 style={styles.cardTitle}>Pending Delivery Partners ({pendingPartners.length})</h3>
-          <table style={styles.dataTable}>
-            <thead>
-              <tr style={styles.tableHeaderRow}>
-                <th style={styles.tableHeaderCell}>Name</th>
-                <th style={styles.tableHeaderCell}>Email</th>
-              {/* --- ADDED THIS HEADER --- */}
-                <th style={styles.tableHeaderCell}>Mobile</th> 
-                <th style={styles.tableHeaderCell}>Actions</th>
-              </tr>
-                </thead>
-            <tbody>
-             {/* --- MODIFIED THIS SECTION --- */}
-              {pendingPartners.length > 0 ? pendingPartners.map((dp) => (
-                <tr key={dp.id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>{dp.full_name}</td>
-                  <td style={styles.tableCell}>{dp.email}</td>
-                {/* --- ADDED THIS CELL --- */}
-                  <td style={styles.tableCell}>{dp.mobile_number || 'N/A'}</td>
-                  <td style={styles.tableCell}>
-                  {/* --- FIXED THIS BUTTON --- */}
-                    <button 
-                        style={styles.actionButton} 
-                        onClick={() => handleViewPartnerDetails(dp)}
-                    >
-                      View & Approve
-                    </button>
-                  </td>
-                </tr>
-              )) : (
-                <tr style={styles.tableRow}>
-                  <td colSpan="4" style={{...styles.tableCell, textAlign: 'center'}}>No pending partners.</td>
-                </tr>
-              )}
-             {/* --- END OF FIX --- */}
-            </tbody>
-          </table>
-        </div>
-  
-        <div style={{ ...styles.tableCard, marginTop: '30px' }}>
-          <h3 style={styles.cardTitle}>Active Delivery Partners ({activePartners.length})</h3>
-          <table style={styles.dataTable}>
-            <thead>
-              <tr style={styles.tableHeaderRow}>
-                <th style={styles.tableHeaderCell}>Name</th>
-                <th style={styles.tableHeaderCell}>Email</th>
-                <th style={styles.tableHeaderCell}>Status</th>
-              </tr>
-                </thead>
-            <tbody>
-              {activePartners.length > 0 ? activePartners.map((dp) => (
-                <tr key={dp.id} style={styles.tableRow}>
-                _ <td style={styles.tableCell}>{dp.full_name}</td>
-                  <td style={styles.tableCell}>{dp.email}</td>
-                  <td style={styles.tableCell}>
-                    <span style={{...styles.activityStatusBadge, backgroundColor: '#10B981'}}>{dp.status}</span>
-                  </td>
-                </tr>
-              )) : (
-                <tr style={styles.tableRow}>
-                  <td colSpan="3" style={{...styles.tableCell, textAlign: 'center'}}>No active partners.</td>
-                </tr>
-              )}
-    _       </tbody>
-          </table>
-        </div>
-        </div>
-    );
-  };
+  const pendingPartners = allDeliveryPartners.filter(dp => dp.status === 'pending');
+  const activePartners = allDeliveryPartners.filter(dp => dp.status === 'active' || dp.status === 'approved');
+
+  return (
+    <div style={styles.contentArea}>
+      <h2 style={styles.pageTitle}>Delivery Partners</h2>
+
+      {/* ---------- Pending Delivery Partners ---------- */}
+      <div style={styles.tableCard}>
+        <h3 style={styles.cardTitle}>Pending Delivery Partners ({pendingPartners.length})</h3>
+        <table style={styles.dataTable}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={styles.tableHeaderCell}>Name</th>
+              <th style={styles.tableHeaderCell}>Email</th>
+              <th style={styles.tableHeaderCell}>Mobile</th>
+              <th style={styles.tableHeaderCell}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pendingPartners.length > 0 ? (
+              pendingPartners.map((dp) => (
+                <tr key={dp.id} style={styles.tableRow}>
+                  <td style={styles.tableCell}>{dp.full_name}</td>
+                  <td style={styles.tableCell}>{dp.email}</td>
+                  <td style={styles.tableCell}>{dp.mobile_number || 'N/A'}</td>
+                  <td style={styles.tableCell}>
+                    {/* ✅ Updated Approve Button */}
+                    <button
+                      style={{
+                        ...styles.actionButton,
+                        backgroundColor: loading ? '#ccc' : '#28a745',
+                        cursor: loading ? 'not-allowed' : 'pointer'
+                      }}
+                      onClick={() => handleApproveDeliveryPartner(dp.id)}
+                      disabled={loading}
+                    >
+                      {loading ? 'Approving...' : 'Approve'}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr style={styles.tableRow}>
+                <td colSpan="4" style={{ ...styles.tableCell, textAlign: 'center' }}>
+                  No pending partners.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ---------- Active Delivery Partners ---------- */}
+      <div style={{ ...styles.tableCard, marginTop: '30px' }}>
+        <h3 style={styles.cardTitle}>Active Delivery Partners ({activePartners.length})</h3>
+        <table style={styles.dataTable}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={styles.tableHeaderCell}>Name</th>
+              <th style={styles.tableHeaderCell}>Email</th>
+              <th style={styles.tableHeaderCell}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activePartners.length > 0 ? (
+              activePartners.map((dp) => (
+                <tr key={dp.id} style={styles.tableRow}>
+                  <td style={styles.tableCell}>{dp.full_name}</td>
+                  <td style={styles.tableCell}>{dp.email}</td>
+                  <td style={styles.tableCell}>
+                    <span
+                      style={{
+                        ...styles.activityStatusBadge,
+                        backgroundColor: '#10B981'
+                      }}
+                    >
+                      {dp.status}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr style={styles.tableRow}>
+                <td colSpan="3" style={{ ...styles.tableCell, textAlign: 'center' }}>
+                  No active partners.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
 
   const renderComplaints = () => {
   return (
