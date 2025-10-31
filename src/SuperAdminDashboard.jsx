@@ -13,6 +13,55 @@ const backendToUiStatus = (s) => {
   if (s === 'delivered') return 'Delivered';
   return 'Resolved';
 };
+// --- Order Assignment Modal Component ---
+const OrderAssignmentModal = ({ isVisible, onClose, order, approvedDeliveryPartners, onSubmit, selectedPartnerId, setSelectedPartnerId, modalStyles, styles, isLoading }) => {
+    if (!isVisible || !order) return null;
+
+    const handleAssign = (e) => {
+        e.preventDefault();
+        if (selectedPartnerId) {
+            onSubmit(order.id, selectedPartnerId);
+        } else {
+            alert('Please select a delivery partner.');
+        }
+    };
+
+    return (
+        <div style={modalStyles.backdrop}>
+            <div style={{ ...modalStyles.modal, maxHeight: '80vh', overflowY: 'auto' }}>
+                <h3 style={modalStyles.title}>Assign Delivery Partner to Order #{order.id}</h3>
+                <p style={styles.modalSubtitle}>Order Details: {order.bottles} bottles for {order.customerName}</p>
+
+                <form onSubmit={handleAssign} style={styles.form}>
+                    <label style={styles.reportLabel}>Select Delivery Partner:</label>
+                    <select
+                        style={styles.textInput}
+                        value={selectedPartnerId}
+                        onChange={(e) => setSelectedPartnerId(e.target.value)}
+                        required
+                        disabled={isLoading}
+                    >
+                        <option value="">-- Select Partner --</option>
+                        {approvedDeliveryPartners.map(dp => (
+                            <option key={dp.id} value={dp.id}>
+                                {dp.full_name} ({dp.email})
+                            </option>
+                        ))}
+                    </select>
+
+                    <div style={modalStyles.actions}>
+                        <button type="button" onClick={onClose} style={modalStyles.cancelButton} disabled={isLoading}>
+                            Cancel
+                        </button>
+                        <button type="submit" style={modalStyles.submitButton} disabled={isLoading || !selectedPartnerId}>
+                            {isLoading ? 'Assigning...' : 'Assign Order'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 const mapComplaint = (c) => {
   const storeNames = c.created_by?.stores?.map(s => s.store_name).join(', ') || 'N/A';
@@ -250,6 +299,9 @@ const SuperAdminDashboard = () => {
   const [ordersStartDate, setOrdersStartDate] = useState('');
   const [ordersEndDate, setOrdersEndDate] = useState('');
   const [filteredOrders, setFilteredOrders] = useState([]);
+  const [isOrderAssigningModalVisible, setIsOrderAssigningModalVisible] = useState(false);
+  const [orderToAssign, setOrderToAssign] = useState(null); // The Order object
+  const [selectedDeliveryPartnerId, setSelectedDeliveryPartnerId] = useState('');
     
     // Update filtered orders whenever allOrders, ordersStartDate, or ordersEndDate changes
     useEffect(() => {
@@ -564,6 +616,80 @@ const handleExportOrdersToExcel = () => {
       setSelectedFile(null);
     }
   };
+// ------------------------------------------
+// --- ORDER APPROVAL HANDLER ---
+// ------------------------------------------
+const handleApproveOrder = async (orderId) => {
+    if (!accessToken) {
+        alert('Authentication token not found. Please log in.');
+        return;
+    }
+    setLoading(true);
+    try {
+        const response = await axios.patch(
+            `${API_BASE_URL}/superadmin/orders/${orderId}/approve`,
+            {},
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+
+        if (response.status === 200) {
+            alert(`Order ${orderId} approved and is now ready for assignment.`);
+            fetchAllData(); // Refresh all data to update the UI
+        } else {
+            throw new Error(response.data?.detail || `Server responded with status ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Order approval failed:', error.response?.data || error.message);
+        alert(`Failed to approve order: ${error.response?.data?.detail || error.message}`);
+    } finally {
+        setLoading(false);
+    }
+};
+
+// ------------------------------------------
+// --- ORDER ASSIGNMENT HANDLERS ---
+// ------------------------------------------
+const handleAssignClick = (order) => {
+    setOrderToAssign(order);
+    setIsOrderAssigningModalVisible(true);
+    setSelectedDeliveryPartnerId(''); // Reset selection
+};
+
+const handleAssignOrderSubmit = async () => {
+    if (!orderToAssign || !selectedDeliveryPartnerId) {
+        alert('Missing order or delivery partner information.');
+        return;
+    }
+    if (!accessToken) {
+        alert('Authentication token not found. Please log in.');
+        return;
+    }
+
+    setLoading(true);
+    try {
+        // API call based on the .tsx file logic
+        const response = await axios.patch(
+            `${API_BASE_URL}/partners/partners/superadmin/orders/${orderToAssign.id}/assign/${selectedDeliveryPartnerId}`,
+            {},
+            { headers: { 'Authorization': `Bearer ${accessToken}` } }
+        );
+
+        if (response.status === 200) {
+            alert(`Order ${orderToAssign.id} successfully assigned to partner ID: ${selectedDeliveryPartnerId}.`);
+            setIsOrderAssigningModalVisible(false);
+            setOrderToAssign(null);
+            setSelectedDeliveryPartnerId('');
+            fetchAllData(); // Refresh data
+        } else {
+            throw new Error(response.data?.detail || `Server responded with status ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Order assignment failed:', error.response?.data || error.message);
+        alert(`Failed to assign order: ${error.response?.data?.detail || error.message}`);
+    } finally {
+        setLoading(false);
+    }
+};
 
   const handleUploadReport = async (e) => {
     e.preventDefault();
@@ -1206,95 +1332,123 @@ const handleViewPartnerDetails = (partner) => {
   );
 
   const renderOrders = () => {
-    return (
-      <div style={styles.contentArea}>
-        <h2 style={styles.pageTitle}>All Orders</h2>
-        {/* 🌟 START: Added Date Filtering & Export UI for Orders Tab (Request 2) 🌟 */}
-        <div style={styles.formCard}>
-            <h3 style={styles.cardTitle}>Search Orders by Date</h3>
-            <div style={styles.datePickerRow}>
-                <div style={styles.dateInputContainer}>
-                    <input
-                        type="date"
-                        value={ordersStartDate}
-                        onChange={(e) => setOrdersStartDate(e.target.value)}
-                        style={styles.dateInput}
-                    />
-                </div>
-                <div style={styles.dateInputContainer}>
-                    <input
-                        type="date"
-                        value={ordersEndDate}
-                        onChange={(e) => setOrdersEndDate(e.target.value)}
-                        style={styles.dateInput}
-                    />
-                </div>
-                {(ordersStartDate || ordersEndDate) && (
-                    <button style={styles.clearButton} onClick={handleClearDates}>
-                        ✕ Clear
-                    </button>
-                )}
-            </div>
-        </div>
+    // Note: This function assumes that 'filteredOrders', 'ordersStartDate', 'ordersEndDate',
+    // 'setOrdersStartDate', 'setOrdersEndDate', 'handleClearDates', 'handleExportOrdersToExcel',
+    // 'handleApproveOrder', 'handleAssignClick', and 'loading' are defined in the scope of the main component.
+    return (
+        <div style={styles.contentArea}>
+            <h2 style={styles.pageTitle}>All Orders</h2>
+            {/* 🌟 START: Added Date Filtering & Export UI for Orders Tab (Request 2) 🌟 */}
+            <div style={styles.formCard}>
+                <h3 style={styles.cardTitle}>Search Orders by Date</h3>
+                <div style={styles.datePickerRow}>
+                    <div style={styles.dateInputContainer}>
+                        <input
+                            type="date"
+                            value={ordersStartDate}
+                            onChange={(e) => setOrdersStartDate(e.target.value)}
+                            style={styles.dateInput}
+                        />
+                    </div>
+                    <div style={styles.dateInputContainer}>
+                        <input
+                            type="date"
+                            value={ordersEndDate}
+                            onChange={(e) => setOrdersEndDate(e.target.value)}
+                            style={styles.dateInput}
+                        />
+                    </div>
+                    {(ordersStartDate || ordersEndDate) && (
+                        <button style={styles.clearButton} onClick={handleClearDates}>
+                            ✕ Clear
+                        </button>
+                    )}
+                </div>
+            </div>
 
-        <button 
-            style={{ ...styles.button, ...styles.secondaryButton, marginBottom: '20px' }} 
-            onClick={handleExportOrdersToExcel} // 🛠️ FIXED: Replaced alert with function call
-            disabled={loading || filteredOrders.length === 0}
-        >
-            {loading ? 'Processing...' : `EXPORT ${filteredOrders.length} ORDERS TO CSV`}
-        </button>
-        {/* 🌟 END: Added Date Filtering & Export UI 🌟 */}
-        
-        <div style={styles.tableCard}>
-          <table style={styles.dataTable}>
-            <thead>
-              <tr style={styles.tableHeaderRow}>
-                <th style={styles.tableHeaderCell}>Order ID</th>
-                <th style={styles.tableHeaderCell}>Customer/Store</th>
-                <th style={styles.tableHeaderCell}>Bottles</th>
-                <th style={styles.tableHeaderCell}>Status</th>
-                <th style={styles.tableHeaderCell}>Order Date</th>
-                <th style={styles.tableHeaderCell}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Use filteredOrders state for rendering */}
-              {filteredOrders.length > 0 ? filteredOrders.map((order) => (
-                <tr key={order.id} style={styles.tableRow}>
-                  <td style={styles.tableCell}>{order.id}</td>
-                  <td style={styles.tableCell}>{order.customerName}</td>
-                  <td style={styles.tableCell}>{order.bottles}</td>
-                  <td style={styles.tableCell}>
-                    <span style={{
-                      ...styles.activityStatusBadge, 
-                      backgroundColor: order.status?.toLowerCase() === 'delivered' ? '#4CAF50' : 
-                                       order.status?.toLowerCase() === 'accepted' ? '#2196F3' : 
-                                       order.status?.toLowerCase() === 'pending' ? '#FF9800' :
-                                       '#757575'
-                    }}>
-                      {order.status}
-                    </span>
-                  </td>
-                  <td style={styles.tableCell}>{order.orderDate.toLocaleDateString()}</td>
-                  <td style={styles.tableCell}>
-                    {order.status?.toLowerCase() === 'pending' && (
-                      <button style={styles.actionButton} onClick={() => alert(`Approve Order ${order.id}`)}>
-                        Approve
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )) : (
-                <tr style={styles.tableRow}><td colSpan="6" style={{...styles.tableCell, textAlign: 'center'}}>No orders found. Adjust your date filters.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div style={{height: '1px'}} />
-      </div>
-    );
-  };
+            <button 
+                style={{ ...styles.button, ...styles.secondaryButton, marginBottom: '20px' }} 
+                onClick={handleExportOrdersToExcel}
+                disabled={loading || filteredOrders.length === 0}
+            >
+                {loading ? 'Processing...' : `EXPORT ${filteredOrders.length} ORDERS TO CSV`}
+            </button>
+            {/* 🌟 END: Added Date Filtering & Export UI 🌟 */}
+            
+            <div style={styles.tableCard}>
+                <table style={styles.dataTable}>
+                    <thead>
+                        <tr style={styles.tableHeaderRow}>
+                            <th style={styles.tableHeaderCell}>Order ID</th>
+                            <th style={styles.tableHeaderCell}>Customer/Store</th>
+                            <th style={styles.tableHeaderCell}>Bottles</th>
+                            <th style={styles.tableHeaderCell}>Status</th>
+                            <th style={styles.tableHeaderCell}>Order Date</th>
+                            <th style={styles.tableHeaderCell}>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {/* Use filteredOrders state for rendering */}
+                        {filteredOrders.length > 0 ? filteredOrders.map((order) => (
+                            <tr key={order.id} style={styles.tableRow}>
+                                <td style={styles.tableCell}>{order.id}</td>
+                                <td style={styles.tableCell}>{order.customerName}</td>
+                                <td style={styles.tableCell}>{order.bottles}</td>
+                                <td style={styles.tableCell}>
+                                    <span style={{
+                                        ...styles.activityStatusBadge, 
+                                        backgroundColor: order.status?.toLowerCase() === 'delivered' ? '#4CAF50' : 
+                                                         order.status?.toLowerCase() === 'accepted' ? '#2196F3' : 
+                                                         order.status?.toLowerCase() === 'pending' ? '#FF9800' :
+                                                         '#757575'
+                                    }}>
+                                        {order.status}
+                                    </span>
+                                </td>
+                                <td style={styles.tableCell}>{order.orderDate.toLocaleDateString()}</td>
+                                
+                                {/* 🌟 START: Updated Actions Cell for Approve/Assign 🌟 */}
+                                <td style={styles.tableCell}>
+                                    {order.status?.toLowerCase() === 'pending' && (
+                                        <button
+                                            onClick={() => handleApproveOrder(order.id)}
+                                            style={{ ...styles.actionButton, backgroundColor: '#3B82F6' }} // Blue for Approve
+                                            disabled={loading}
+                                        >
+                                            Approve
+                                        </button>
+                                    )}
+
+                                    {/* Assign button appears only for 'accepted' orders that haven't been assigned yet */}
+                                    {(order.status?.toLowerCase() === 'accepted' && !order.deliveryPartnerId) && (
+                                        <button
+                                            onClick={() => handleAssignClick(order)}
+                                            style={{ ...styles.actionButton, backgroundColor: '#F59E0B' }} // Orange for Assign
+                                            disabled={loading}
+                                        >
+                                            Assign Partner
+                                        </button>
+                                    )}
+
+                                    {/* Display assigned partner name if it exists (and not already delivered) */}
+                                    {order.deliveryPartnerName && order.status?.toLowerCase() !== 'delivered' && (
+                                        <span style={{ fontSize: '12px', color: '#10B981', display: 'block', marginTop: '5px' }}>
+                                            Assigned: {order.deliveryPartnerName}
+                                        </span>
+                                    )}
+                                </td>
+                                {/* 🌟 END: Updated Actions Cell 🌟 */}
+                            </tr>
+                        )) : (
+                            <tr style={styles.tableRow}><td colSpan="6" style={{...styles.tableCell, textAlign: 'center'}}>No orders found. Adjust your date filters.</td></tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+            <div style={{height: '1px'}} />
+        </div>
+    );
+};
   
   const renderCreatePartner = () => {
     const assignedStoreIds = new Set();
@@ -1899,6 +2053,21 @@ const renderActiveStoresList = () => {
         isLoading={resolvingComplaint}
         modalStyles={styles.modalStyles} 
       />
+// ... inside SuperAdminDashboard's final return statement
+{/* ... renderOrders() call ... */}
+
+          <OrderAssignmentModal
+              isVisible={isOrderAssigningModalVisible}
+              onClose={() => setIsOrderAssigningModalVisible(false)}
+              order={orderToAssign}
+              approvedDeliveryPartners={approvedDeliveryPartners}
+              onSubmit={handleAssignOrderSubmit}
+              selectedPartnerId={selectedDeliveryPartnerId}
+              setSelectedPartnerId={setSelectedDeliveryPartnerId}
+              modalStyles={modalStyles} // Assuming modalStyles is available
+              styles={styles} // Assuming styles is available
+              isLoading={loading}
+          />
 
       {/* --- QR ASSIGN BOTTLE MODAL --- */}
       <AssignBottleModal 
