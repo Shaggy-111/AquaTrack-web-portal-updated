@@ -620,39 +620,34 @@ const handleExportOrdersToExcel = () => {
 // --- ORDER APPROVAL HANDLER ---
 // ------------------------------------------
 const handleApproveOrder = async (orderId) => {
-    if (!accessToken) {
-        alert('Authentication token not found. Please log in.');
-        return;
-    }
-    setLoading(true);
-    try {
-        const response = await axios.patch(
-            // Ensure the URL is exactly correct:
-            `${API_BASE_URL}/superadmin/orders/${orderId}/approve`,
-            {},
-            { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
+  if (!accessToken) {
+    alert('Authentication token not found. Please log in.');
+    return;
+  }
 
-        // --- 🌟 CRITICAL FIX HERE 🌟 ---
-        // Change from response.status === 200 to check for any 2xx status code.
-        // This is necessary if the API returns 202 or 204 on successful PATCH.
-        if (response.status >= 200 && response.status < 300) { 
-            alert(`Order ${orderId} approved and is now ready for assignment.`);
-            // Refreshing all data is the safest way to update the UI
-            fetchAllData(); 
-        } else {
-            // This 'else' block is unlikely to run with axios for non-2xx codes,
-            // but kept for robustness.
-            throw new Error(response.data?.detail || `Server responded with status ${response.status}`);
-        }
-    } catch (error) {
-        // Axios catches all non-2xx status codes (like 401, 403, 500) here.
-        console.error('Order approval failed:', error.response?.data || error.message);
-        alert(`Failed to approve order: ${error.response?.data?.detail || error.message}`);
-    } finally {
-        setLoading(false);
+  setLoading(true);
+  try {
+    const response = await axios.patch(
+      `${API_BASE_URL}/superadmin/orders/${orderId}/approve`,
+      {},
+      { headers: { 'Authorization': `Bearer ${accessToken}` } }
+    );
+
+    if (response.status >= 200 && response.status < 300) {
+      alert(`Order ${orderId} approved and is now ready for assignment.`);
+      fetchAllData();
+    } else {
+      throw new Error(response.data?.detail || `Server responded with status ${response.status}`);
     }
+  } catch (error) {
+    console.error('Order approval failed:', error.response?.data || error.message);
+    alert(`Failed to approve order: ${error.response?.data?.detail || error.message}`);
+  } finally {
+    setLoading(false);
+  }
 };
+
+
 // ------------------------------------------
 // --- ORDER ASSIGNMENT HANDLERS ---
 // ------------------------------------------
