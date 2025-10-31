@@ -623,33 +623,31 @@ const handleExportOrdersToExcel = () => {
 // --- DELIVERY PARTNER APPROVAL HANDLER ---
 // ------------------------------------------
 const handleApproveDeliveryPartner = async (dpId) => {
-    if (!accessToken) {
-        alert('Authentication token not found. Please log in again.');
-        return;
-    }
+  if (!accessToken) {
+    alert('Authentication token not found. Please log in again.');
+    return;
+  }
 
-    setLoading(true);
-    try {
-        const response = await axios.patch(
-            `${API_BASE_URL}/partners/partners/superadmin/delivery-partners/${dpId}/approve`,
-            {},
-            { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
+  setLoading(true);
+  try {
+    const response = await axios.patch(
+      `${API_BASE_URL}/partners/partners/superadmin/delivery-partners/${dpId}/approve`,
+      {},
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
 
-        // ✅ Handle any 2xx success code (200, 202, 204 etc.)
-        if (response.status >= 200 && response.status < 300) {
-            alert(`Delivery Partner ID ${dpId} approved successfully.`);
-            // Refresh dashboard data to reflect update
-            fetchAllData();
-        } else {
-            throw new Error(`Unexpected server status: ${response.status}`);
-        }
-    } catch (error) {
-        console.error('Delivery Partner approval failed:', error.response?.data || error.message);
-        alert(`Failed to approve delivery partner: ${error.response?.data?.detail || error.message}`);
-    } finally {
-        setLoading(false);
+    if (response.status >= 200 && response.status < 300) {
+      alert(`Delivery Partner approved successfully!`);
+      fetchAllData(); // refresh data
+    } else {
+      throw new Error(`Unexpected server response: ${response.status}`);
     }
+  } catch (error) {
+    console.error('Approval failed:', error.response?.data || error.message);
+    alert(`Failed to approve delivery partner: ${error.response?.data?.detail || error.message}`);
+  } finally {
+    setLoading(false);
+  }
 };
 
 
@@ -1601,15 +1599,18 @@ const handleViewPartnerDetails = (partner) => {
                   <td style={styles.tableCell}>{dp.email}</td>
                   <td style={styles.tableCell}>{dp.mobile_number || 'N/A'}</td>
                   <td style={styles.tableCell}>
-                    {/* ✅ Updated Approve Button */}
+                    {/* ✅ Correct Approve Button */}
                     <button
-                      style={{
-                        ...styles.actionButton,
-                        backgroundColor: loading ? '#ccc' : '#28a745',
-                        cursor: loading ? 'not-allowed' : 'pointer'
-                      }}
                       onClick={() => handleApproveDeliveryPartner(dp.id)}
                       disabled={loading}
+                      style={{
+                        backgroundColor: loading ? '#ccc' : '#28a745',
+                        color: 'white',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        cursor: loading ? 'not-allowed' : 'pointer'
+                      }}
                     >
                       {loading ? 'Approving...' : 'Approve'}
                     </button>
@@ -1645,12 +1646,7 @@ const handleViewPartnerDetails = (partner) => {
                   <td style={styles.tableCell}>{dp.full_name}</td>
                   <td style={styles.tableCell}>{dp.email}</td>
                   <td style={styles.tableCell}>
-                    <span
-                      style={{
-                        ...styles.activityStatusBadge,
-                        backgroundColor: '#10B981'
-                      }}
-                    >
+                    <span style={{ ...styles.activityStatusBadge, backgroundColor: '#10B981' }}>
                       {dp.status}
                     </span>
                   </td>
@@ -1669,6 +1665,7 @@ const handleViewPartnerDetails = (partner) => {
     </div>
   );
 };
+
 
   const renderComplaints = () => {
   return (
