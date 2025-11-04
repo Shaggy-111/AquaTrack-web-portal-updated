@@ -622,29 +622,53 @@ const handleExportOrdersToExcel = () => {
 // ------------------------------------------
 // --- DELIVERY PARTNER APPROVAL HANDLER ---
 // ------------------------------------------
-const handleApproveDeliveryPartner = async (dpId) => {
-  if (!accessToken) {
-    alert('Authentication token not found. Please log in again.');
+const handleApproveDeliveryPartner = async (partnerId) => {
+  // Step 1: Get valid token
+  const token = accessToken || localStorage.getItem('userToken');
+  if (!token) {
+    alert('Authentication token missing. Please login again.');
+    navigate('/login/superadmin');
     return;
   }
 
+  // Step 2: Ask confirmation
+  if (!window.confirm(`Are you sure you want to approve this Delivery Partner (ID: ${partnerId})?`))
+    return;
+
   setLoading(true);
   try {
+    // Step 3: Use the same API as mobile
     const response = await axios.patch(
-      `${API_BASE_URL}/partners/partners/superadmin/delivery-partners/${dpId}/approve`,
-      {},
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      `${API_BASE_URL}/partners/partners/superadmin/delivery-partners/${partnerId}/approve`,
+      {}, // empty body same as app
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 15000,
+      }
     );
 
-    if (response.status >= 200 && response.status < 300) {
-      alert(`Delivery Partner approved successfully!`);
-      fetchAllData(); // refresh data
+    if (response.status === 200 || response.status === 204) {
+      alert('✅ Delivery Partner approved successfully!');
+      await fetchAllData(); // refresh list
     } else {
-      throw new Error(`Unexpected server response: ${response.status}`);
+      console.error('Unexpected response:', response.status, response.data);
+      alert(`Unexpected response from server: ${response.status}`);
     }
   } catch (error) {
-    console.error('Approval failed:', error.response?.data || error.message);
-    alert(`Failed to approve delivery partner: ${error.response?.data?.detail || error.message}`);
+    console.error('❌ Partner approval failed:', error.response?.data || error.message);
+
+    // Step 4: CORS or auth diagnostic
+    if (error.message.includes('Network Error')) {
+      alert('Network error: possible CORS issue. Check backend CORS settings.');
+    } else if (error.response?.status === 401) {
+      alert('Session expired. Please log in again.');
+      navigate('/login/superadmin');
+    } else {
+      alert(`Failed to approve: ${error.response?.data?.detail || error.message}`);
+    }
   } finally {
     setLoading(false);
   }
