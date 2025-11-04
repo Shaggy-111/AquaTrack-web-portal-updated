@@ -1,6 +1,16 @@
 [build]
-  command = "npm install && npm run build"
-  publish = "dist"
+  command = "npm run build"
+  publish = "build"
 
-[build.environment]
-  NODE_VERSION = "20.19.0"
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Optional: If your frontend makes API calls to Fly.io backend
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Access-Control-Allow-Methods = "GET, POST, PATCH, PUT, DELETE, OPTIONS"
