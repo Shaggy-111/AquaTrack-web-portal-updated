@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from './config';
+import { QRCodeCanvas } from "qrcode.react";
+
 
 // --- Configuration ---
-const API_BASE_URL = 'https://aquatrack-backend.fly.dev';
+
 const BOTTLE_PRICE = 100; // Use BOTTLE_PRICE from this SuperAdmin file
 
 // --- Helper Functions ---
@@ -77,20 +80,34 @@ const mapComplaint = (c) => {
   };
 };
 const mapOrderData = (apiData) => {
-  if (!apiData) return [];
-  return apiData.map(item => ({
-    id: String(item.id),
-    bottles: parseInt(item.order_details, 10),
-    status: item.status,
-    orderDate: new Date(item.created_at),
-    isPartnerOrder: !!item.partner_id,
-    partner_id: item.partner_id,
-    partnerName: item.partner ? item.partner.full_name : 'N/A',
-    customerName: item.store ? item.store.store_name : 'Customer',
-    deliveryPartnerId: item.delivery_person_id,
-    deliveryPartnerName: item.delivery_person ? item.delivery_person.full_name : 'N/A',
-  }));
+  if (!apiData) return [];
+
+  const normalizeStatus = (status) => {
+    if (!status) return 'Pending';
+    const s = status.toLowerCase().replace('-', '_');
+    if (s === 'pending') return 'Pending';
+    if (s === 'accepted') return 'Accepted';
+    if (s === 'in_transit') return 'In Transit';
+    if (s === 'delivered') return 'Delivered';
+    if (s === 'cancelled') return 'Cancelled';
+    if (s === 'assigned') return 'Assigned';
+    return status; // fallback
+  };
+
+  return apiData.map(item => ({
+    id: String(item.id),
+    bottles: parseInt(item.order_details, 10),
+    status: normalizeStatus(item.status),
+    orderDate: new Date(item.created_at),
+    isPartnerOrder: !!item.partner_id,
+    partner_id: item.partner_id,
+    partnerName: item.partner ? item.partner.full_name : 'N/A',
+    customerName: item.store ? item.store.store_name : 'Customer',
+    deliveryPartnerId: item.delivery_person_id,
+    deliveryPartnerName: item.delivery_person ? item.delivery_person.full_name : 'N/A',
+  }));
 };
+
 
 const formatReportMonth = (dateString) => {
     if (!dateString) return 'N/A';
@@ -234,100 +251,174 @@ const AssignBottleModal = ({ isVisible, onClose, selectedBottlesToAssign, approv
 
 // --- Main Component ---
 const SuperAdminDashboard = () => {
-  const [currentTab, setCurrentTab] = useState('dashboard');
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
+  const [currentTab, setCurrentTab] = useState("dashboard");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  // --- Dashboard Data States ---
-  const [totalOrders, setTotalOrders] = useState(0);
-  const [customerOrdersCount, setCustomerOrdersCount] = useState(0);
-  const [partnerOrdersCount, setPartnerOrdersCount] = useState(0);
-  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
-  const [totalActiveStores, setTotalActiveStores] = useState(0);
-  const [totalVendors, setTotalVendors] = useState(0);
-  const [totalDeliveryPartners, setTotalDeliveryPartners] = useState(0);
-  const [dailyOrders, setDailyOrders] = useState(0);
-  const [newComplaints, setNewComplaints] = useState(0);
-  const [totalRevenue, setTotalRevenue] = useState(0);
-  const [monthlyRevenue, setMonthlyRevenue] = useState(0);
-  const [monthlyOrdersCount, setMonthlyOrdersCount] = useState(0);
-  const [pendingDeliveryPartnersCount, setPendingDeliveryPartnersCount] = useState(0); 
-  // 🌟 NEW KPIs 🌟
-  const [dailyDeliveredOrders, setDailyDeliveredOrders] = useState(0);
-  const [monthlyDeliveredOrders, setMonthlyDeliveredOrders] = useState(0);
-  
-  // --- BOTTLE KPIs STATES (Needed for Dashboard) ---
-  const [freshBottlesWarehouse, setFreshBottlesWarehouse] = useState(0); 
-  const [emptyBottlesStores, setEmptyBottlesStores] = useState(0); 
-  
-// --- QR Management States ---
-  const [generatedQrData, setGeneratedQrData] = useState(null);
-  const [qrAssigning, setQrAssigning] = useState(false); 
-  const [selectedBottlesToAssign, setSelectedBottlesToAssign] = useState([]);
-  const [unassignedBottles, setUnassignedBottles] = useState([]); 
+  // --- Dashboard Data States ---
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [customerOrdersCount, setCustomerOrdersCount] = useState(0);
+  const [partnerOrdersCount, setPartnerOrdersCount] = useState(0);
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
+  const [totalActiveStores, setTotalActiveStores] = useState(0);
+  const [totalVendors, setTotalVendors] = useState(0);
+  const [totalDeliveryPartners, setTotalDeliveryPartners] = useState(0);
+  const [dailyOrders, setDailyOrders] = useState(0);
+  const [newComplaints, setNewComplaints] = useState(0);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [monthlyRevenue, setMonthlyRevenue] = useState(0);
+  const [monthlyOrdersCount, setMonthlyOrdersCount] = useState(0);
+  const [pendingDeliveryPartnersCount, setPendingDeliveryPartnersCount] =
+    useState(0);
 
-  // --- Core Data States ---
-  const [partners, setPartners] = useState([]);
-  const [allOrders, setAllOrders] = useState([]);
-  const [allDeliveryPartners, setAllDeliveryPartners] = useState([]);
-  const [approvedDeliveryPartners, setApprovedDeliveryPartners] = useState([]);
-  const [complaints, setComplaints] = useState([]);
-  const [isSolutionModalVisible, setIsSolutionModalVisible] = useState(false);
-  const [currentComplaintId, setCurrentComplaintId] = useState(null);
-  const [solutionText, setSolutionText] = useState('');
-  const [resolvingComplaint, setResolvingComplaint] = useState(false); 
-  // ... near other useState hooks
-  const [isPartnerDetailsModalVisible, setIsPartnerDetailsModalVisible] = useState(false);
-  const [selectedPartnerForDetails, setSelectedPartnerForDetails] = useState(null);
-  // --- Report Management States ---
-  const [reports, setReports] = useState([]);
-  const [selectedFile, setSelectedFile] = useState(null); 
-  const [uploadingReport, setUploadingReport] = useState(false); 
-  const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7)); 
-  
-  // --- New Partner Creation Form States ---
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [mobileNumber, setMobileNumber] = useState('');
-  const [stores, setStores] = useState([]); 
-  const [selectedStoreIds, setSelectedStoreIds] = useState([]);
+  // 🌟 NEW KPIs 🌟
+  const [dailyDeliveredOrders, setDailyDeliveredOrders] = useState(0);
+  const [monthlyDeliveredOrders, setMonthlyDeliveredOrders] = useState(0);
 
-  const [accessToken, setAccessToken] = useState(null);
-    
- // 🌟 NEW STATES FOR DATE FILTERING IN ORDERS TAB 🌟
-  const [ordersStartDate, setOrdersStartDate] = useState('');
-  const [ordersEndDate, setOrdersEndDate] = useState('');
-  const [filteredOrders, setFilteredOrders] = useState([]);
-  const [isOrderAssigningModalVisible, setIsOrderAssigningModalVisible] = useState(false);
+  // --- BOTTLE KPIs STATES (Needed for Dashboard) ---
+  const [freshBottlesWarehouse, setFreshBottlesWarehouse] = useState(0);
+  const [emptyBottlesStores, setEmptyBottlesStores] = useState(0);
+
+  // --- QR Management States ---
+  const [generatedQrData, setGeneratedQrData] = useState(null);
+  const [qrAssigning, setQrAssigning] = useState(false);
+  const [selectedBottlesToAssign, setSelectedBottlesToAssign] = useState([]);
+  const [unassignedBottles, setUnassignedBottles] = useState([]);
+
+  const [isStoreDetailsModalVisible, setIsStoreDetailsModalVisible] = useState(false);
+  const [selectedStoreForDetails, setSelectedStoreForDetails] = useState(null);
+
+  
+  const [loadingQR, setLoadingQR] = useState(false);
+
+
+  const [newStoreName, setNewStoreName] = useState("");
+  const [newStoreCity, setNewStoreCity] = useState("");
+  const [newStoreAddress, setNewStoreAddress] = useState("");
+  const [newStoreLat, setNewStoreLat] = useState("");
+  const [newStoreLong, setNewStoreLong] = useState("");
+
+
+  const [qrSummary, setQrSummary] = useState({});
+
+
+  
+
+
+
+  // --- QR Management Handlers ---
+  const handleGenerateQR = async () => {
+    try {
+      setLoading(true);
+
+      const token =
+        accessToken ||
+        localStorage.getItem('auth_token') ||
+        localStorage.getItem('userToken') ||
+        localStorage.getItem('partner_token');
+
+      if (!token) {
+        alert('Authentication Required. Please log in to access the dashboard.');
+        navigate('/login/superadmin');
+        return;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/bottle/superadmin/generate-qr`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        // mirror the TSX error parsing
+        let message = `Server error: ${res.status} ${res.statusText}`;
+        try {
+          const err = await res.json();
+          if (Array.isArray(err.detail)) message = err.detail.map(d => d.msg).join('; ');
+          else if (typeof err.detail === 'string') message = err.detail;
+        } catch { }
+        throw new Error(message);
+      }
+
+      const data = await res.json();
+      setGeneratedQrData(data);
+      alert('A new QR code has been generated and stored.');
+      await fetchAllData();
+    } catch (e) {
+      console.error('Failed to generate QR:', e);
+      alert(e.message || 'Failed to generate QR code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  // --- Core Data States ---
+  const [partners, setPartners] = useState([]);
+  const [allOrders, setAllOrders] = useState([]);
+  const [allDeliveryPartners, setAllDeliveryPartners] = useState([]);
+  const [approvedDeliveryPartners, setApprovedDeliveryPartners] = useState([]);
+  const [complaints, setComplaints] = useState([]);
+  const [isSolutionModalVisible, setIsSolutionModalVisible] = useState(false);
+  const [currentComplaintId, setCurrentComplaintId] = useState(null);
+  const [solutionText, setSolutionText] = useState("");
+  const [resolvingComplaint, setResolvingComplaint] = useState(false);
+
+  // --- Partner Details Modal ---
+  const [isPartnerDetailsModalVisible, setIsPartnerDetailsModalVisible] =
+    useState(false);
+  const [selectedPartnerForDetails, setSelectedPartnerForDetails] =
+    useState(null);
+
+  // --- Report Management States ---
+  const [reports, setReports] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadingReport, setUploadingReport] = useState(false);
+  const [reportMonth, setReportMonth] = useState(
+    new Date().toISOString().slice(0, 7)
+  );
+
+  // --- New Partner Creation Form States ---
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mobileNumber, setMobileNumber] = useState("");
+  const [stores, setStores] = useState([]);
+  const [selectedStoreIds, setSelectedStoreIds] = useState([]);
+
+  const [accessToken, setAccessToken] = useState(null);
+
+  // 🌟 NEW STATES FOR DATE FILTERING IN ORDERS TAB 🌟
+  const [ordersStartDate, setOrdersStartDate] = useState("");
+  const [ordersEndDate, setOrdersEndDate] = useState("");
+  const [filteredOrders, setFilteredOrders] = useState([]);
+  const [isOrderAssigningModalVisible, setIsOrderAssigningModalVisible] =
+    useState(false);
   const [orderToAssign, setOrderToAssign] = useState(null); // The Order object
-  const [selectedDeliveryPartnerId, setSelectedDeliveryPartnerId] = useState('');
-    
-    // Update filtered orders whenever allOrders, ordersStartDate, or ordersEndDate changes
-    useEffect(() => {
-        let filtered = allOrders;
+  const [selectedDeliveryPartnerId, setSelectedDeliveryPartnerId] =
+    useState("");
 
-        if (ordersStartDate && ordersEndDate) {
-            const start = new Date(ordersStartDate);
-            // Set time to end of day for proper range filtering
-            const end = new Date(ordersEndDate);
-            end.setHours(23, 59, 59, 999); 
-            
+  // --- EFFECT: Update filtered orders whenever filters or data change ---
+  useEffect(() => {
+    let filtered = allOrders;
 
-            filtered = allOrders.filter(order => {
-                const orderDate = new Date(order.orderDate);
-                // Compare date objects
-                return orderDate >= start && orderDate <= end;
-            });
-        }
-        setFilteredOrders(filtered);
-    }, [ordersStartDate, ordersEndDate, allOrders]);
-    
-    const handleClearDates = () => {
-        setOrdersStartDate('');
-        setOrdersEndDate('');
-    };
+    if (ordersStartDate && ordersEndDate) {
+      const start = new Date(ordersStartDate);
+      const end = new Date(ordersEndDate);
+      end.setHours(23, 59, 59, 999); // include the entire end date
 
+      filtered = allOrders.filter((order) => {
+        const orderDate = new Date(order.orderDate);
+        return orderDate >= start && orderDate <= end;
+      });
+    }
+
+    setFilteredOrders(filtered);
+  }, [ordersStartDate, ordersEndDate, allOrders]);
+
+  const handleClearDates = () => {
+    setOrdersStartDate("");
+    setOrdersEndDate("");
+  };
 
     // 🟢 NEW DATA AGGREGATION FOR CHART 🟢
     const getMonthlyOrderData = useMemo(() => {
@@ -392,46 +483,68 @@ const SuperAdminDashboard = () => {
     const fetchAllData = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('userToken');
-      if (!token) {
-        alert('Authentication Required. Please log in to access the dashboard.');
-        navigate('/login/superadmin');
-        return;
-      }
-      setAccessToken(token);
+      const token =
+        localStorage.getItem('auth_token') ||
+        localStorage.getItem('userToken') ||
+        localStorage.getItem('partner_token');
 
-      const authHeaders = { headers: { 'Authorization': `Bearer ${token}` } };
-      
-      // 1. Define all API promises
-      const promises = [
-        axios.get(`${API_BASE_URL}/superadmin/orders/all`, authHeaders),         // [0] All Orders
-        axios.get(`${API_BASE_URL}/superadmin/orders/pending`, authHeaders),      // [1] Pending Orders
-        axios.get(`${API_BASE_URL}/store/store/list`, authHeaders),             // [2] Stores List
-        axios.get(`${API_BASE_URL}/partners/partners/list`, authHeaders),         // [3] Partners List
-        axios.get(`${API_BASE_URL}/partners/partners/superadmin/delivery-partners`, authHeaders), // [4] Delivery Partners
-        axios.get(`${API_BASE_URL}/bottle/superadmin/unassigned-bottles`, authHeaders), // [5] Unassigned Bottles
-        axios.get(`${API_BASE_URL}/complaints/complaints/assigned`, authHeaders), // [6] Complaints
-        axios.get(`${API_BASE_URL}/bottle/partner/me/empty-bottles`, authHeaders), // [7] Empty Bottles
-        axios.get(`${API_BASE_URL}/reports/reports/list`, authHeaders),           // [8] Reports List
-      ];
-      
-      // 2. Wait for all promises to settle (resolve or reject)
-      const results = await Promise.allSettled(promises);
-      
-      // Helper to safely get data or null
-      const getData = (index) => {
-        const result = results[index];
-        if (result.status === 'fulfilled') {
-            return result.value.data;
-        } else {
-            console.warn(`API at index ${index} failed:`, result.reason?.response?.data || result.reason?.message);
-            // Check for critical auth error in a rejected promise
-            if (result.reason?.response?.status === 401) {
-                throw new Error('Authentication Error during data fetch.');
-            }
-            return null;
-        }
-      };
+      if (!token) {
+        alert('Authentication Required. Please log in to access the dashboard.');
+        navigate('/login/superadmin');
+        return;
+      }
+      setAccessToken(token);
+
+
+      const authHeaders = {
+        headers: { Authorization: `Bearer ${token}` },
+      };
+
+      // 1️⃣ Detect role (from localStorage or token)
+      const userRole =
+        localStorage.getItem('user_role') ||
+        localStorage.getItem('role') ||
+        'superadmin';
+
+      // 2️⃣ Define API calls conditionally
+      const promises = [
+        axios.get(`${API_BASE_URL}/superadmin/orders/all`, authHeaders),          // [0] All Orders
+        axios.get(`${API_BASE_URL}/superadmin/orders/pending`, authHeaders),      // [1] Pending Orders
+        axios.get(`${API_BASE_URL}/store/list`, authHeaders),               // [2] Stores List
+        axios.get(`${API_BASE_URL}/partners/partners/list`, authHeaders),         // [3] Partners List
+        axios.get(`${API_BASE_URL}/partners/partners/superadmin/delivery-partners`, authHeaders), // [4] Delivery Partners
+        axios.get(`${API_BASE_URL}/bottle/superadmin/unassigned-bottles`, authHeaders), // [5] Unassigned Bottles
+        axios.get(`${API_BASE_URL}/complaints/complaints/assigned`, authHeaders), // [6] Complaints
+
+        // ✅ Only call this if role is partner — otherwise skip
+        userRole === 'partner'
+          ? axios.get(`${API_BASE_URL}/bottle/partner/me/empty-bottles`, authHeaders)
+          : Promise.resolve({ data: { total_empty_bottles: 0 } }),                // [7] Empty Bottles (default)
+
+        axios.get(`${API_BASE_URL}/reports/reports/list`, authHeaders),           // [8] Reports List
+      ];
+
+      // 3️⃣ Wait for all promises to settle (resolve or reject)
+      const results = await Promise.allSettled(promises);
+
+      // 4️⃣ Helper to safely get data or null
+      const getData = (index) => {
+        const result = results[index];
+        if (result.status === 'fulfilled') {
+          return result.value.data;
+        } else {
+          console.warn(
+            `API at index ${index} failed:`,
+            result.reason?.response?.data || result.reason?.message
+          );
+
+          // Handle token expiry
+          if (result.reason?.response?.status === 401) {
+            throw new Error('Authentication Error during data fetch.');
+          }
+          return null;
+        }
+      };
       
       // 3. Process Fulfilled Promises Safely
       const allOrdersData = getData(0);
@@ -542,65 +655,114 @@ const SuperAdminDashboard = () => {
 
   useEffect(() => {
     fetchAllData();
+   
+
   }, [navigate]);
   
   // ------------------------------------------
   // --- EXCEL EXPORT HANDLER (FIX for SS1) ---
-  // ------------------------------------------
+
+
+
+const fetchQrData = async () => {
+  try {
+    // ✅ FIX: Use the correct token keys from your login
+    const token =
+      localStorage.getItem('auth_token') ||
+      localStorage.getItem('userToken') ||
+      localStorage.getItem('partner_token') ||
+      accessToken;
+
+    if (!token) {
+      console.error("QR data fetch skipped: No token found.");
+      return; 
+    }
+
+    const headers = { Authorization: `Bearer ${token}` };
+
+    // Fetch both summary and unassigned bottles at the same time
+    const [summaryRes, unassignedRes] = await Promise.allSettled([
+      axios.get(`${API_BASE_URL}/bottle/superadmin/summary`, { headers }),
+      axios.get(`${API_BASE_URL}/bottle/superadmin/unassigned-bottles`, { headers }),
+    ]);
+
+    // Process summary
+    if (summaryRes.status === 'fulfilled') {
+        setQrSummary(summaryRes.value.data || {});
+    } else {
+        console.error("Failed to fetch QR summary:", summaryRes.reason);
+    }
+    
+    // Process unassigned bottles
+    if (unassignedRes.status === 'fulfilled') {
+        const mappedBottles = (unassignedRes.value.data || []).map((bottle) => ({
+                UUID: bottle.uuid,
+                qr_code: bottle.qr_code,
+            }));
+            setUnassignedBottles(mappedBottles);
+    } else {
+        console.warn("Failed to fetch unassigned bottles:", unassignedRes.reason);
+    }
+
+  } catch (error) {
+    console.error("Error in fetchQrData:", error);
+  }
+};
+
 
 const handleExportOrdersToExcel = () => {
-  if (filteredOrders.length === 0) {
-    alert("No orders available to export.");
-    return;
-  }
+  if (filteredOrders.length === 0) {
+    alert("No orders available to export.");
+    return;
+  }
 
-  const headers = [
-    "Order ID",
-    "Customer/Store Name",
-    "Is Partner Order",
-    "Bottles Ordered",
-    "Total Revenue (INR)",
-    "Status",
-    "Order Date",
-    "Delivery Partner",
-  ];
+  const headers = [
+    "Order ID",
+    "Customer/Store Name",
+    "Is Partner Order",
+    "Bottles Ordered",
+    "Total Revenue (INR)",
+    "Status",
+    "Order Date & Time",
+    "Delivery Partner",
+  ];
 
-  const csvData = filteredOrders.map(order => {
-    const isDelivered = order.status?.toLowerCase() === 'delivered';
-    const revenue = isDelivered ? order.bottles * BOTTLE_PRICE : 0;
-    
-    // Escape commas in string fields if necessary (though unlikely for these fields)
-    const escape = (value) => `"${String(value).replace(/"/g, '""')}"`;
+  const csvData = filteredOrders.map(order => {
+    const isDelivered = order.status?.toLowerCase() === 'delivered';
+    const revenue = isDelivered ? order.bottles * BOTTLE_PRICE : 0;
 
-    return [
-      escape(order.id),
-      escape(order.customerName),
-      escape(order.isPartnerOrder ? 'Yes' : 'No'),
-      order.bottles,
-      revenue,
-      escape(order.status),
-      order.orderDate.toLocaleDateString(),
-      escape(order.deliveryPartnerName),
-    ].join(',');
-  });
+    const escape = (value) => `"${String(value).replace(/"/g, '""')}"`;
 
-  // Combine headers and data
-  const csvContent = [headers.join(','), ...csvData].join('\n');
+    const orderDateTime = `${order.orderDate.toLocaleDateString()} ${order.orderDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}`;
 
-  // Create a Blob and download it
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  
-  const today = new Date().toISOString().slice(0, 10);
-  const filename = `Aquatrack_Orders_${ordersStartDate || 'All'}_to_${ordersEndDate || 'All'}_${today}.csv`;
-  
-  link.href = URL.createObjectURL(blob);
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(link.href);
+    return [
+      escape(order.id),
+      escape(order.customerName),
+      escape(order.isPartnerOrder ? 'Yes' : 'No'),
+      order.bottles,
+      revenue,
+      escape(order.status),
+      escape(orderDateTime),
+      escape(order.deliveryPartnerName),
+    ].join(',');
+  });
+
+  const csvContent = [headers.join(','), ...csvData].join('\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+
+  const today = new Date().toISOString().slice(0, 10);
+  const filename = `Aquatrack_Orders_${ordersStartDate || 'All'}_to_${ordersEndDate || 'All'}_${today}.csv`;
+
+  link.href = URL.createObjectURL(blob);
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
 };
+
 
 
   // ------------------------------------------
@@ -622,25 +784,33 @@ const handleExportOrdersToExcel = () => {
 // ------------------------------------------
 // --- DELIVERY PARTNER APPROVAL HANDLER ---
 // ------------------------------------------
+// ------------------------------------------
+// --- DELIVERY PARTNER APPROVAL HANDLER ---
+// ------------------------------------------
 const handleApproveDeliveryPartner = async (partnerId) => {
-  // Step 1: Get valid token
-  const token = accessToken || localStorage.getItem('userToken');
+  // Step 1: Get valid token (handles all key names)
+  const token =
+    accessToken ||
+    localStorage.getItem('auth_token') ||
+    localStorage.getItem('userToken') ||
+    localStorage.getItem('partner_token');
+
   if (!token) {
     alert('Authentication token missing. Please login again.');
     navigate('/login/superadmin');
     return;
   }
 
-  // Step 2: Ask confirmation
+  // Step 2: Confirm approval
   if (!window.confirm(`Are you sure you want to approve this Delivery Partner (ID: ${partnerId})?`))
     return;
 
   setLoading(true);
   try {
-    // Step 3: Use the same API as mobile
+    // Step 3: Use backend API
     const response = await axios.patch(
       `${API_BASE_URL}/partners/partners/superadmin/delivery-partners/${partnerId}/approve`,
-      {}, // empty body same as app
+      {}, // empty body
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -652,17 +822,15 @@ const handleApproveDeliveryPartner = async (partnerId) => {
 
     if (response.status === 200 || response.status === 204) {
       alert('✅ Delivery Partner approved successfully!');
-      await fetchAllData(); // refresh list
+      await fetchAllData(); // refresh
     } else {
       console.error('Unexpected response:', response.status, response.data);
-      alert(`Unexpected response from server: ${response.status}`);
+      alert(`Unexpected server response: ${response.status}`);
     }
   } catch (error) {
     console.error('❌ Partner approval failed:', error.response?.data || error.message);
-
-    // Step 4: CORS or auth diagnostic
     if (error.message.includes('Network Error')) {
-      alert('Network error: possible CORS issue. Check backend CORS settings.');
+      alert('Network error: possible CORS issue.');
     } else if (error.response?.status === 401) {
       alert('Session expired. Please log in again.');
       navigate('/login/superadmin');
@@ -674,539 +842,673 @@ const handleApproveDeliveryPartner = async (partnerId) => {
   }
 };
 
+const handleApproveOrder = async (orderId) => {
+  const token =
+    accessToken ||
+    localStorage.getItem('auth_token') ||
+    localStorage.getItem('userToken') ||
+    localStorage.getItem('partner_token');
+
+  if (!token) {
+    alert('Authentication token missing. Please log in again.');
+    navigate('/login/superadmin');
+    return;
+  }
+
+  if (!window.confirm(`Are you sure you want to approve Order #${orderId}?`)) {
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const response = await axios.patch(
+      `${API_BASE_URL}/superadmin/orders/${orderId}/approve`, // ✅ fixed endpoint
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (response.status === 200 || response.status === 204) {
+      alert(`✅ Order #${orderId} approved successfully!`);
+      await fetchAllData(); // refresh the table
+    } else {
+      throw new Error(`Unexpected server response: ${response.status}`);
+    }
+  } catch (error) {
+    console.error('Order approval failed:', error.response?.data || error.message);
+    alert(
+      error.response?.data?.detail ||
+        `Failed to approve order: ${error.message}`
+    );
+  } finally {
+    setLoading(false);
+  }
+};
+
 
 // ------------------------------------------
 // --- ORDER ASSIGNMENT HANDLERS ---
 // ------------------------------------------
 const handleAssignClick = (order) => {
-    setOrderToAssign(order);
-    setIsOrderAssigningModalVisible(true);
-    setSelectedDeliveryPartnerId(''); // Reset selection
+  setOrderToAssign(order);
+  setIsOrderAssigningModalVisible(true);
+  setSelectedDeliveryPartnerId(''); // reset
 };
 
 const handleAssignOrderSubmit = async () => {
-    if (!orderToAssign || !selectedDeliveryPartnerId) {
-        alert('Missing order or delivery partner information.');
-        return;
+  if (!orderToAssign || !selectedDeliveryPartnerId) {
+    alert('Missing order or delivery partner info.');
+    return;
+  }
+
+  const token =
+    accessToken ||
+    localStorage.getItem('auth_token') ||
+    localStorage.getItem('userToken') ||
+    localStorage.getItem('partner_token');
+
+  if (!token) {
+    alert('Authentication token not found. Please log in.');
+    navigate('/login/superadmin');
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const response = await axios.patch(
+      `${API_BASE_URL}/partners/partners/superadmin/orders/${orderToAssign.id}/assign/${selectedDeliveryPartnerId}`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (response.status === 200) {
+      alert(`Order ${orderToAssign.id} successfully assigned.`);
+      setIsOrderAssigningModalVisible(false);
+      setOrderToAssign(null);
+      setSelectedDeliveryPartnerId('');
+      fetchAllData();
+    } else {
+      throw new Error(response.data?.detail || `Server responded with ${response.status}`);
     }
-    if (!accessToken) {
-        alert('Authentication token not found. Please log in.');
-        return;
+  } catch (error) {
+    console.error('Order assignment failed:', error.response?.data || error.message);
+    alert(`Failed to assign order: ${error.response?.data?.detail || error.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
+
+const handleAddStore = async (e) => {
+  e.preventDefault();
+  const token = accessToken || localStorage.getItem("auth_token");
+
+  if (!token) {
+    alert("Authentication token missing.");
+    navigate("/login/superadmin");
+    return;
+  }
+
+  try {
+    setLoading(true);
+    const body = {
+      store_name: newStoreName,
+      city: newStoreCity,
+      address: newStoreAddress,
+      latitude: parseFloat(newStoreLat) || null,
+      longitude: parseFloat(newStoreLong) || null,
+    };
+    const res = await axios.post(`${API_BASE_URL}/store/create`, body, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (res.status === 201) {
+      alert("✅ Store added successfully!");
+      setNewStoreName("");
+      setNewStoreCity("");
+      setNewStoreAddress("");
+      setNewStoreLat("");
+      setNewStoreLong("");
+      await fetchAllData();
+    }
+  } catch (err) {
+    console.error("Error adding store:", err.response?.data || err.message);
+    alert(err.response?.data?.detail || "Failed to add store.");
+  } finally {
+    setLoading(false);
+  }
+};
+
+const handleDeleteStore = async (storeId) => {
+  const token = accessToken || localStorage.getItem("auth_token");
+  if (!token) {
+    alert("Authentication token missing.");
+    navigate("/login/superadmin");
+    return;
+  }
+
+  if (!window.confirm("Are you sure you want to delete this store?")) return;
+
+  try {
+    setLoading(true);
+    const res = await axios.delete(`${API_BASE_URL}/store/${storeId}/delete`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (res.status === 200 || res.status === 204) {
+      alert("Store deleted successfully!");
+      await fetchAllData();
+    }
+  } catch (err) {
+    console.error("Delete failed:", err.response?.data || err.message);
+    alert(err.response?.data?.detail || "Failed to delete store.");
+  } finally {
+    setLoading(false);
+  }
+};
+
+// ------------------------------------------
+// --- BOTTLE ASSIGNMENT HANDLER (Fix) ---
+// ------------------------------------------
+  // Assign bottles to a delivery partner — TSX-aligned
+  const handleAssignBottlesToPartner = async (deliveryPartnerId) => {
+    const token =
+      accessToken ||
+      localStorage.getItem('auth_token') ||
+      localStorage.getItem('userToken') ||
+      localStorage.getItem('partner_token');
+
+    if (!token) {
+      alert('Authentication token not found. Please log in again.');
+      navigate('/login/superadmin');
+      return;
+    }
+    if (!selectedBottlesToAssign || selectedBottlesToAssign.length === 0) {
+      alert('Please select at least one bottle to assign.');
+      return;
     }
 
     setLoading(true);
     try {
-        // API call based on the .tsx file logic
-        const response = await axios.patch(
-            `${API_BASE_URL}/partners/partners/superadmin/orders/${orderToAssign.id}/assign/${selectedDeliveryPartnerId}`,
-            {},
-            { headers: { 'Authorization': `Bearer ${accessToken}` } }
-        );
+      const res = await fetch(`${API_BASE_URL}/bottle/superadmin/assign`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          qr_codes: selectedBottlesToAssign,
+          delivery_boy_id: parseInt(deliveryPartnerId, 10),
+        }),
+      });
 
-        if (response.status === 200) {
-            alert(`Order ${orderToAssign.id} successfully assigned to partner ID: ${selectedDeliveryPartnerId}.`);
-            setIsOrderAssigningModalVisible(false);
-            setOrderToAssign(null);
-            setSelectedDeliveryPartnerId('');
-            fetchAllData(); // Refresh data
-        } else {
-            throw new Error(response.data?.detail || `Server responded with status ${response.status}`);
-        }
-    } catch (error) {
-        console.error('Order assignment failed:', error.response?.data || error.message);
-        alert(`Failed to assign order: ${error.response?.data?.detail || error.message}`);
+      if (!res.ok) {
+        let message = `Server error: ${res.status} ${res.statusText}`;
+        try {
+          const err = await res.json();
+          if (Array.isArray(err.detail)) message = err.detail.map(d => d.msg).join('; ');
+          else if (typeof err.detail === 'string') message = err.detail;
+        } catch { }
+        throw new Error(message);
+      }
+
+      const result = await res.json();
+      alert(result.message || 'Assigned successfully!');
+      setQrAssigning(false);
+      setSelectedBottlesToAssign([]);
+      await fetchAllData();
+    } catch (e) {
+      console.error('Failed to assign bottles:', e);
+      alert(e.message || 'Failed to assign bottles.');
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
+  };
+
+
+  // ------------------------------------------
+// --- PARTNER APPROVAL HANDLER ---
+// ------------------------------------------
+const handleApprovePartner = async (partnerId) => {
+    try {
+      setLoading(true);
+
+      const token =
+        accessToken ||
+        localStorage.getItem('auth_token') ||
+        localStorage.getItem('userToken') ||
+        localStorage.getItem('partner_token');
+
+      if (!token) {
+        alert('Authentication token is missing. Please login again.');
+        navigate('/login/superadmin');
+        return;
+      }
+
+      // Confirm approval
+      if (!window.confirm(`Are you sure you want to approve this partner (ID: ${partnerId})?`))
+        return;
+
+      const response = await axios.patch(
+        `${API_BASE_URL}/partners/partners/superadmin/approve-delivery-partner/${partnerId}`,
+        { status: 'approved' },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.status === 200 || response.status === 201) {
+        alert('✅ Partner approved successfully!');
+        setIsPartnerDetailsModalVisible(false);
+        setSelectedPartnerForDetails(null);
+        await fetchAllData();
+      } else {
+        console.error('Unexpected response:', response.status, response.data);
+        alert(`Unexpected response from server: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('❌ Partner approval failed:', error.response?.data || error.message);
+
+      if (error.response?.status === 401) {
+        alert('Session expired. Please login again.');
+        navigate('/login/superadmin');
+      } else {
+        alert(`Failed to approve partner: ${error.response?.data?.detail || error.message}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const PartnerDetailsModal = ({
+    isVisible,
+    onClose,
+    onApprove,
+    partner,
+    isLoading,
+    modalStyles
+  }) => {
+    if (!isVisible || !partner) return null;
+
+    return (
+      <div style={modalStyles.backdrop}>
+        <div
+          style={{
+            ...modalStyles.modal,
+            width: '600px',
+            maxHeight: '90vh',
+            overflowY: 'auto'
+          }}
+        >
+          <h3 style={modalStyles.title}>Partner Approval Details</h3>
+          <p style={{ fontWeight: 500, color: '#444' }}>
+            Reviewing: <b>{partner.full_name}</b> ({partner.email})
+          </p>
+
+          {/* The partner detail grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '10px' }}>
+            <div>
+              <p><b>Full Name:</b> {partner.full_name}</p>
+              <p><b>Email:</b> {partner.email}</p>
+              <p><b>Mobile:</b> {partner.mobile_number}</p>
+              <p><b>Address:</b> {partner.current_address}</p>
+              <p><b>Vehicle No:</b> {partner.vehicle_number}</p>
+              <p><b>License No:</b> {partner.driving_license_number}</p>
+              <p><b>ID Type:</b> {partner.id_type}</p>
+              <p><b>ID Number:</b> {partner.govt_id}</p>
+            </div>
+            <div>
+              {partner.govt_id_photo_url && (
+                <div>
+                  <p><b>Government ID Photo:</b></p>
+                  <a
+                    href={`${API_BASE_URL}/${partner.govt_id_photo_url}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <img
+                      src={`${API_BASE_URL}/${partner.govt_id_photo_url}`}
+                      alt="Govt ID"
+                      style={{ width: '100%', borderRadius: 8 }}
+                    />
+                  </a>
+                </div>
+              )}
+              {partner.delivery_photo_url && (
+                <div style={{ marginTop: 10 }}>
+                  <p><b>Partner Photo:</b></p>
+                  <a
+                    href={`${API_BASE_URL}/${partner.delivery_photo_url}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <img
+                      src={`${API_BASE_URL}/${partner.delivery_photo_url}`}
+                      alt="Partner"
+                      style={{ width: '100%', borderRadius: 8 }}
+                    />
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Buttons */}
+          <div style={modalStyles.actions}>
+            <button onClick={onClose} style={modalStyles.cancelButton} disabled={isLoading}>
+              Cancel
+            </button>
+            <button
+              onClick={() => onApprove(partner.id)}
+              style={modalStyles.submitButton}
+              disabled={isLoading}
+            >
+              {isLoading ? 'Approving...' : 'Approve Partner'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+
+  const StoreDetailsModal = ({ isVisible, onClose, store, partners, modalStyles }) => {
+  if (!isVisible || !store) return null;
+
+  // Find assigned partners
+  const assignedPartners = partners.filter(p =>
+    p.stores.some(s => s.id === store.id)
+  );
+  const partnerNames = assignedPartners.map(p => p.full_name).join(', ') || 'N/A';
+
+  return (
+    <div style={modalStyles.backdrop}>
+      <div style={{ ...modalStyles.modal, width: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <h3 style={modalStyles.title}>Store Details</h3>
+        <div style={styles.detailsGrid}>
+          <div style={styles.detailsColumn}>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Store Name:</p>
+              <p style={styles.detailValue}>{store.store_name}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>City:</p>
+              <p style={styles.detailValue}>{store.city}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Address:</p>
+              <p style={styles.detailValue}>{store.address || 'N/A'}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Latitude:</p>
+              <p style={styles.detailValue}>{store.latitude || 'N/A'}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Longitude:</p>
+              <p style={styles.detailValue}>{store.longitude || 'N/A'}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Partner(s):</p>
+              <p style={styles.detailValue}>{partnerNames}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={modalStyles.actions}>
+          <button onClick={onClose} style={modalStyles.cancelButton}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
 };
 
-  const handleUploadReport = async (e) => {
-    e.preventDefault();
-    
-    if (!selectedFile || !reportMonth) {
-        alert('Please select a PDF file and choose the month.');
-        return;
-    }
-    if (!accessToken) {
-        alert('Authentication token is missing. Please log in again.');
-        return;
-    }
 
-    setUploadingReport(true);
-    const formData = new FormData();
-    
-    const isoDateString = `${reportMonth}-01`; 
-    formData.append('report_file', selectedFile); 
-    formData.append('report_date', isoDateString); 
 
-    try {
-        const response = await axios.post(
-            `${API_BASE_URL}/reports/reports/upload`,
-            formData,
-            {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                },
-            }
-        );
+// ------------------------------------------
+// --- REPORT UPLOAD / DOWNLOAD HANDLERS ---
+// ------------------------------------------
+const handleUploadReport = async (e) => {
+  e.preventDefault();
 
-        if (response.status >= 200 && response.status < 300) {
-            alert('Monthly report uploaded successfully! (Status: ' + response.status + ')');
-            setSelectedFile(null);
-            e.target.reset(); 
-            await fetchAllData(); 
-        } else {
-            throw new Error(`Server responded with status ${response.status}`);
-        }
-    } catch (error) {
-        console.error('Report upload failed. Full error:', error.response?.data || error.message);
-        
-        let specificError = 'An unexpected error occurred.';
+  const token =
+    accessToken ||
+    localStorage.getItem('auth_token') ||
+    localStorage.getItem('userToken') ||
+    localStorage.getItem('partner_token');
 
-        if (error.response) {
-            if (error.response.data && error.response.data.message) {
-                 specificError = error.response.data.message;
-            } else {
-                 specificError = `Server returned status ${error.response.status}.`;
-            }
-        } else {
-            specificError = 'Network error (No response).';
-        }
-        
-        alert(`Report upload failed: ${specificError} Check console for details.`);
-    } finally {
-        setUploadingReport(false);
-    }
+  if (!selectedFile || !reportMonth) {
+    alert('Please select a PDF file and choose the month.');
+    return;
+  }
+  if (!token) {
+    alert('Authentication token missing. Please log in again.');
+    navigate('/login/superadmin');
+    return;
+  }
+
+  setUploadingReport(true);
+  const formData = new FormData();
+  const isoDateString = `${reportMonth}-01`;
+  formData.append('report_file', selectedFile);
+  formData.append('report_date', isoDateString);
+
+  try {
+    const response = await axios.post(`${API_BASE_URL}/reports/reports/upload`, formData, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (response.status >= 200 && response.status < 300) {
+      alert('Monthly report uploaded successfully!');
+      setSelectedFile(null);
+      e.target.reset();
+      await fetchAllData();
+    } else {
+      throw new Error(`Server responded with status ${response.status}`);
+    }
+  } catch (error) {
+    console.error('Report upload failed:', error.response?.data || error.message);
+    const errMsg =
+      error.response?.data?.message ||
+      error.response?.data?.detail ||
+      `Upload failed: ${error.message}`;
+    alert(errMsg);
+  } finally {
+    setUploadingReport(false);
+  }
 };
 
 const handleReportDownload = async (reportId) => {
-    if (!accessToken) {
-        alert("Authentication required to download file.");
-        return;
-    }
+  const token =
+    accessToken ||
+    localStorage.getItem('auth_token') ||
+    localStorage.getItem('userToken') ||
+    localStorage.getItem('partner_token');
 
-    try {
-        const downloadUrl = `${API_BASE_URL}/reports/reports/download/${reportId}`;
-        
-        const response = await axios.get(
-            downloadUrl,
-            {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`, 
-                },
-                responseType: 'blob', 
-            }
-        );
+  if (!token) {
+    alert('Authentication required to download file.');
+    navigate('/login/superadmin');
+    return;
+  }
 
-        if (response.status === 200) {
-            const blob = new Blob([response.data], { type: response.headers['content-type'] });
-            const url = window.URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            
-            const filename = `Report_${reportId}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  try {
+    const response = await axios.get(`${API_BASE_URL}/reports/reports/download/${reportId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'blob',
+    });
 
-            link.href = url;
-            link.setAttribute('download', filename);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(url);
-            
-        } else {
-            alert(`Download failed: Server returned status ${response.status}.`);
-        }
-    } catch (error) {
-        console.error('Download failed:', error.response?.data || error.message);
-        alert('File download failed. The specific download API endpoint may be incorrect or unauthorized.');
-    }
+    if (response.status === 200) {
+      const blob = new Blob([response.data], { type: response.headers['content-type'] });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const filename = `Report_${reportId}_${new Date().toISOString().slice(0, 10)}.pdf`;
+
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } else {
+      alert(`Download failed: ${response.status}`);
+    }
+  } catch (error) {
+    console.error('Download failed:', error.response?.data || error.message);
+    alert('File download failed. Check API endpoint or authorization.');
+  }
 };
 
-  // ------------------------------------------
-  // --- COMPLAINT RESOLUTION HANDLERS ---
-  // ------------------------------------------
-
-  const handleResolveClick = (complaintId) => {
-    setCurrentComplaintId(complaintId);
-    setSolutionText(''); 
-    setIsSolutionModalVisible(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsSolutionModalVisible(false);
-    setCurrentComplaintId(null);
-    setSolutionText('');
-  };
-
-  const handleSolutionSubmit = async (e) => {
-    e.preventDefault();
-    const trimmedSolutionText = solutionText.trim();
-    
-    if (!trimmedSolutionText) {
-        alert("Please enter a resolution message.");
-        return;
-    }
-    if (!currentComplaintId || !accessToken) {
-        if (!accessToken) {
-            alert('Authentication token is missing. Please log in again.');
-            localStorage.removeItem('userToken');
-            navigate('/login/superadmin');
-        }
-        return;
-    }
-
-    setResolvingComplaint(true);
-
-    try {
-        const payload = { 
-            status: 'resolved', 
-            solution: trimmedSolutionText
-        };
-        
-        const response = await axios.patch( 
-            `${API_BASE_URL}/complaints/complaints/${currentComplaintId}/resolve`,
-            payload, 
-            {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json',
-                },
-            }
-        );
-
-        if (response.status === 200) {
-            alert(`Complaint #${currentComplaintId} successfully resolved.`);
-            handleCloseModal();
-            await fetchAllData(); 
-        } else {
-            throw new Error(response.data?.message || `Server responded with status ${response.status}`);
-        }
-    } catch (error) {
-        console.error('Complaint resolution failed:', error.response?.data || error.message);
-        let specificError = 'Check console for network/server details.';
-
-        if (error.response) {
-            if (error.response.data && error.response.data.detail) {
-                specificError = JSON.stringify(error.response.data.detail);
-            } else if (error.response.status === 401 || error.response.status === 403) {
-                specificError = 'Authorization failed. Please log in again.';
-                localStorage.removeItem('userToken');
-                navigate('/login/superadmin');
-                return;
-            } else {
-                specificError = `Server returned status ${error.response.status}.`;
-            }
-        } else if (error.request) {
-            specificError = 'Network error: Server did not respond.';
-        }
-
-        alert(`Failed to resolve complaint: ${specificError}`);
-    } finally {
-        setResolvingComplaint(false);
-    }
-  };
-
-
-  // --- Partner Creation Function ---
-  const handleCreatePartner = async (e) => {
-    e.preventDefault();
-    const trimmedFullName = fullName.trim();
-    const trimmedEmail = email.trim();
-    const trimmedMobileNumber = mobileNumber.trim(); 
-
-    if (selectedStoreIds.length === 0) {
-        alert("Validation Error: Please select at least one store to assign to the new partner.");
-        return;
-    }
-    
-    if (!trimmedFullName || !trimmedEmail || !password || !trimmedMobileNumber) {
-        alert("Validation Error: All fields (Name, Email, Password, Mobile) must be filled.");
-        return;
-    }
-    
-    if (trimmedMobileNumber.length < 10 || trimmedMobileNumber.length > 15 || !/^\d+$/.test(trimmedMobileNumber)) {
-         alert("Validation Error: Mobile number appears invalid. Please enter a valid number (e.g., 10-15 digits).");
-         return;
-    }
-
-    if (!accessToken) {
-        alert("Authentication token is missing. Please re-login.");
-        return;
-    }
-    
-    setLoading(true);
-
-    const partnerData = {
-        full_name: trimmedFullName,
-        email: trimmedEmail,
-        password: password, 
-        mobile_number: trimmedMobileNumber,
-        stores: selectedStoreIds, 
-        role: 'partner',
-    };
-
-    try {
-        const response = await axios.post(
-            `${API_BASE_URL}/partners/partners/superadmin/create`,
-            partnerData,
-            {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json',
-                },
-            }
-        );
-
-        if (response.status === 201) {
-            alert(`Partner ${trimmedFullName} created successfully!`);
-            
-            setFullName('');
-            setEmail('');
-            setPassword('');
-            setMobileNumber('');
-            setSelectedStoreIds([]);
-            
-            await fetchAllData(); 
-            setCurrentTab('myPartners');
-        }
-    } catch (error) {
-        console.error('Partner creation failed:', error.response?.data || error.message);
-        
-        let specificError = 'Failed to create partner. An unknown error occurred.';
-        
-        if (error.response) {
-            if (error.response.data && typeof error.response.data === 'object' && Object.keys(error.response.data).length > 0) {
-                 specificError = `Validation Error (422): ${JSON.stringify(error.response.data)}`;
-            } else if (error.response.status === 422) {
-                specificError = 'Data Validation failed (422). Check all fields are correct, unique, and not empty.';
-            } else if (error.response.status === 401) {
-                specificError = 'Authentication failed. Please log out and log back in.';
-                localStorage.removeItem('userToken'); 
-                navigate('/login/superadmin'); 
-                setLoading(false);
-                return;
-            } else {
-                specificError = `Server responded with status ${error.response.status}: ${error.response.statusText}`;
-            }
-        } else if (error.request) {
-            specificError = 'Network Error: Could not reach the API server.';
-        } else {
-            specificError = error.message;
-        }
-
-        alert(`Error: ${specificError}`);
-    } finally {
-        setLoading(false);
-    }
-  };
-
-// --- QR MANAGEMENT HANDLERS ---
-
-    const handleGenerateQR = async () => {
-        if (!accessToken) {
-            alert('Authentication token not found.');
-            return;
-        }
-        setLoading(true);
-        try {
-            const response = await axios.post(
-                `${API_BASE_URL}/bottle/superadmin/generate-qr`,
-                null, 
-                {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                    },
-                }
-            );
-
-            if (response.status === 201 || response.status === 200) {
-                setGeneratedQrData(response.data);
-                alert('Success: A new QR code has been generated and stored.');
-                await fetchAllData();
-            } else {
-                const errorDetail = response.data?.detail || response.data?.message || `Server returned status ${response.status}.`;
-                throw new Error(errorDetail);
-            }
-        } catch (error) {
-            console.error('Failed to generate QR:', error.response?.data || error.message);
-            alert('Error: Failed to generate QR code. Check console for details.');
-        } finally {
-            setLoading(false);
-        }
-    };
-    const PartnerDetailsModal = ({ isVisible, onClose, onApprove, partner, isLoading, modalStyles }) => {
-    if (!isVisible || !partner) return null;
-
-    // Helper function to render a detail item
-    const DetailItem = ({ label, value }) => (
-        <div style={styles.detailItem}>
-            <p style={styles.detailLabel}>{label}:</p>
-            <p style={styles.detailValue}>{value || 'N/A'}</p>
-        </div>
-    );
-
-    // Helper function to render an image
-    const DetailImage = ({ label, imageUrl }) => (
-        <div style={styles.imageItem}>
-            <p style={styles.detailLabel}>{label}</p>
-            {imageUrl ? (
-                <a href={`${API_BASE_URL}/${imageUrl}`} target="_blank" rel="noopener noreferrer">
-                    <img 
-                        src={`${API_BASE_URL}/${imageUrl}`} 
-                        alt={label} 
-                        style={styles.detailImage} 
-                    />
-                </a>
-            ) : (
-                <p style={styles.detailValue}>No Image Uploaded</p>
-            )}
-        </div>
-    );
-
-    return (
-        <div style={modalStyles.backdrop}>
-            <div style={{ ...modalStyles.modal, width: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
-                <h3 style={modalStyles.title}>Partner Approval Details</h3>
-                <p style={styles.modalSubtitle}>Reviewing: **{partner.full_name}** ({partner.email})</p>
-
-                <div style={styles.detailsGrid}>
-                    {/* Column 1: Personal & Vehicle Details */}
-                    <div style={styles.detailsColumn}>
-                        <DetailItem label="Full Name" value={partner.full_name} />
-                        <DetailItem label="Email" value={partner.email} />
-                        <DetailItem label="Mobile" value={partner.mobile_number} />
-                        <DetailItem label="Address" value={`${partner.current_address}, ${partner.city}, ${partner.state}`} />
-                        <DetailItem label="Vehicle No." value={partner.vehicle_number} />
-                        <DetailItem label="Driving License" value={partner.driving_license_number} />
-                        <DetailItem label="Govt ID Type" value={partner.id_type} />
-                        <DetailItem label="Govt ID No." value={partner.govt_id} />
-                    </div>
-
-                    {/* Column 2: Images */}
-                    <div style={styles.detailsColumn}>
-                        {/*                          * IMPORTANT: I am assuming your API returns image paths as 
-                         * 'govt_id_photo_url' and 'delivery_photo_url'. 
-                         * Please check your API response and change these field names if they are different!
-                        */}
-                        <DetailImage label="Government ID Photo" imageUrl={partner.govt_id_photo_url} />
-                        <DetailImage label="Delivery Partner Photo" imageUrl={partner.delivery_photo_url} />
-                    </div>
-                </div>
-                
-                <div style={modalStyles.actions}>
-                    <button type="button" onClick={onClose} style={modalStyles.cancelButton} disabled={isLoading}>
-                        Cancel
-                    </button>
-                    <button 
-                        type="button" 
-                        style={modalStyles.submitButton} 
-                        disabled={isLoading}
-                        onClick={() => onApprove(partner.id)}
-                    >
-                        {isLoading ? 'Approving...' : 'Approve Partner'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
+// ------------------------------------------
+// --- COMPLAINT RESOLUTION HANDLERS ---
+// ------------------------------------------
+const handleResolveClick = (complaintId) => {
+  setCurrentComplaintId(complaintId);
+  setSolutionText('');
+  setIsSolutionModalVisible(true);
 };
 
-const handleViewPartnerDetails = (partner) => {
-    setSelectedPartnerForDetails(partner);
-    setIsPartnerDetailsModalVisible(true);
-  };
+const handleCloseModal = () => {
+  setIsSolutionModalVisible(false);
+  setCurrentComplaintId(null);
+  setSolutionText('');
+};
 
-  const handleApprovePartner = async (partnerId) => {
-    if (!accessToken) {
-        alert("Authentication token is missing. Please re-login.");
-        return;
-    }
-    if (!window.confirm(`Are you sure you want to approve this partner (ID: ${partnerId})?`)) {
-        return;
-    }
+const handleSolutionSubmit = async (e) => {
+  e.preventDefault();
 
-    setLoading(true); // Use the general loading state
-    try {
-        // IMPORTANT: I am assuming this API endpoint. You may need to change it.
-        const response = await axios.patch(
-            `${API_BASE_URL}/partners/partners/superadmin/approve-delivery-partner/${partnerId}`,
-            { status: 'approved' }, // Or 'active', depending on your backend logic
-            {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json',
-                },
-            }
-        );
+  const token =
+    accessToken ||
+    localStorage.getItem('auth_token') ||
+    localStorage.getItem('userToken') ||
+    localStorage.getItem('partner_token');
 
-        if (response.status === 200) {
-            alert('Partner approved successfully!');
-            setIsPartnerDetailsModalVisible(false); // Close the modal
-            setSelectedPartnerForDetails(null);
-            await fetchAllData(); // Refresh all data
-        } else {
-            throw new Error(response.data?.message || `Server responded with status ${response.status}`);
-        }
-    } catch (error) {
-        console.error('Partner approval failed:', error.response?.data || error.message);
-        alert(`Failed to approve partner: ${error.response?.data?.detail || error.message}`);
-    } finally {
-        setLoading(false);
-    }
-  };
+  const trimmedText = solutionText.trim();
 
-    const handleAssignBottlesToPartner = async (deliveryPartnerId) => {
-        if (!accessToken) {
-            alert('Authentication token not found.');
-            return;
-        }
-        if (selectedBottlesToAssign.length === 0) {
-            alert('Error: Please select at least one bottle to assign.');
-        }
+  if (!trimmedText) {
+    alert('Please enter a resolution message.');
+    return;
+  }
+  if (!currentComplaintId || !token) {
+    alert('Authentication missing or invalid.');
+    navigate('/login/superadmin');
+    return;
+  }
 
-        setLoading(true);
-        try {
-            const response = await axios.post(
-                `${API_BASE_URL}/bottle/superadmin/assign`,
-                {
-                    qr_codes: selectedBottlesToAssign,
-                    delivery_boy_id: parseInt(deliveryPartnerId, 10),
-                },
-                {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'Content-Type': 'application/json',
-                    },
-                }
-            );
+  setResolvingComplaint(true);
+  try {
+    const payload = { status: 'resolved', solution: trimmedText };
+    const response = await axios.patch(
+      `${API_BASE_URL}/complaints/complaints/${currentComplaintId}/resolve`,
+      payload,
+      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+    );
 
-            if (response.status === 200) {
-                alert(`Success: ${response.data.message}`);
-                setSelectedBottlesToAssign([]);
-                setQrAssigning(false);
-                await fetchAllData();
-            } else {
-                throw new Error(response.data?.detail || 'Failed to assign bottles.');
-            }
-        } catch (error) {
-            console.error('Failed to assign bottles:', error.response?.data || error.message);
-            const errorMessage = error.response?.data?.detail || error.message || 'An unexpected error occurred.';
-            alert(`Error: ${errorMessage}`);
-        } finally {
-            setLoading(false);
-        }
-    };
+    if (response.status === 200) {
+      alert(`Complaint #${currentComplaintId} successfully resolved.`);
+      handleCloseModal();
+      await fetchAllData();
+    } else {
+      throw new Error(`Server responded with ${response.status}`);
+    }
+  } catch (error) {
+    console.error('Complaint resolution failed:', error.response?.data || error.message);
+    alert(`Failed: ${error.response?.data?.detail || error.message}`);
+  } finally {
+    setResolvingComplaint(false);
+  }
+};
 
+// ------------------------------------------
+// --- PARTNER CREATION HANDLER ---
+// ------------------------------------------
+const handleCreatePartner = async (e) => {
+  e.preventDefault();
+  const trimmedFullName = fullName.trim();
+  const trimmedEmail = email.trim();
+  const trimmedMobile = mobileNumber.trim();
 
-  const handleLogout = () => {
-    localStorage.removeItem('userToken');
-    alert('You have been successfully logged out.');
-    navigate('/login/superadmin');
-  };
+  const token =
+    accessToken ||
+    localStorage.getItem('auth_token') ||
+    localStorage.getItem('userToken') ||
+    localStorage.getItem('partner_token');
 
-  const handleSelectTab = (tab) => {
-    setCurrentTab(tab);
-  };
-  
+  if (!trimmedFullName || !trimmedEmail || !password || !trimmedMobile) {
+    alert('All fields are required.');
+    return;
+  }
+  if (selectedStoreIds.length === 0) {
+    alert('Please select at least one store.');
+    return;
+  }
+  if (!token) {
+    alert('Authentication token missing.');
+    navigate('/login/superadmin');
+    return;
+  }
+
+  setLoading(true);
+  const partnerData = {
+    full_name: trimmedFullName,
+    email: trimmedEmail,
+    password,
+    mobile_number: trimmedMobile,
+    stores: selectedStoreIds,
+    role: 'partner',
+  };
+
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}/partners/partners/superadmin/create`,
+      partnerData,
+      {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }
+    );
+
+    if (response.status === 201) {
+      alert(`Partner ${trimmedFullName} created successfully!`);
+      setFullName('');
+      setEmail('');
+      setPassword('');
+      setMobileNumber('');
+      setSelectedStoreIds([]);
+      await fetchAllData();
+      setCurrentTab('myPartners');
+    }
+  } catch (error) {
+    console.error('Partner creation failed:', error.response?.data || error.message);
+    alert(`Error: ${error.response?.data?.detail || error.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
+
+// ------------------------------------------
+// --- LOGOUT HANDLER ---
+// ------------------------------------------
+const handleLogout = () => {
+  ['auth_token', 'userToken', 'partner_token', 'user_role', 'store_id', 'store_name'].forEach((k) =>
+    localStorage.removeItem(k)
+  );
+  alert('You have been successfully logged out.');
+  navigate('/login/superadmin');
+};
+
+  const handleSelectTab = (tabName) => {
+    setCurrentTab(tabName);
+
+    // 🚀 Auto-fetch data when QR tab opens
+    if (tabName === "qrManagement") {
+      fetchQrData(); // ✅ Call the main QR fetch function
+    }
+  };
+
   const renderDashboard = () => (
     <div style={styles.contentArea}>
       <div style={styles.kpiRow}>
@@ -1361,124 +1663,183 @@ const handleViewPartnerDetails = (partner) => {
   );
 
   const renderOrders = () => {
-    // Note: This function assumes that 'filteredOrders', 'ordersStartDate', 'ordersEndDate',
-    // 'setOrdersStartDate', 'setOrdersEndDate', 'handleClearDates', 'handleExportOrdersToExcel',
-    // 'handleApproveOrder', 'handleAssignClick', and 'loading' are defined in the scope of the main component.
-    return (
-        <div style={styles.contentArea}>
-            <h2 style={styles.pageTitle}>All Orders</h2>
-            {/* 🌟 START: Added Date Filtering & Export UI for Orders Tab (Request 2) 🌟 */}
-            <div style={styles.formCard}>
-                <h3 style={styles.cardTitle}>Search Orders by Date</h3>
-                <div style={styles.datePickerRow}>
-                    <div style={styles.dateInputContainer}>
-                        <input
-                            type="date"
-                            value={ordersStartDate}
-                            onChange={(e) => setOrdersStartDate(e.target.value)}
-                            style={styles.dateInput}
-                        />
-                    </div>
-                    <div style={styles.dateInputContainer}>
-                        <input
-                            type="date"
-                            value={ordersEndDate}
-                            onChange={(e) => setOrdersEndDate(e.target.value)}
-                            style={styles.dateInput}
-                        />
-                    </div>
-                    {(ordersStartDate || ordersEndDate) && (
-                        <button style={styles.clearButton} onClick={handleClearDates}>
-                            ✕ Clear
-                        </button>
+  const pendingOrders = filteredOrders.filter(
+    (order) => order.status?.toLowerCase() === "pending"
+  );
+  const pendingForApprovalOrders = filteredOrders.filter(
+    (order) => order.status?.toLowerCase() === "pending_for_approval"
+  );
+  const otherOrders = filteredOrders.filter(
+    (order) =>
+      order.status?.toLowerCase() !== "pending" &&
+      order.status?.toLowerCase() !== "pending_for_approval"
+  );
+
+  const renderTable = (orders, title, color = "#4CAF50") => (
+    <div style={{ ...styles.tableCard, marginBottom: "30px" }}>
+      <h3 style={{ ...styles.cardTitle, color }}>{title} ({orders.length})</h3>
+      <table style={styles.dataTable}>
+        <thead>
+          <tr style={styles.tableHeaderRow}>
+            <th style={styles.tableHeaderCell}>Order ID</th>
+            <th style={styles.tableHeaderCell}>Customer/Store</th>
+            <th style={styles.tableHeaderCell}>Bottles</th>
+            <th style={styles.tableHeaderCell}>Status</th>
+            <th style={styles.tableHeaderCell}>Order Date</th>
+            <th style={styles.tableHeaderCell}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.length > 0 ? (
+            orders.map((order) => (
+              <tr key={order.id} style={styles.tableRow}>
+                <td style={styles.tableCell}>{order.id}</td>
+                <td style={styles.tableCell}>{order.customerName}</td>
+                <td style={styles.tableCell}>{order.bottles}</td>
+                <td style={styles.tableCell}>
+                  <span
+                    style={{
+                      ...styles.activityStatusBadge,
+                      backgroundColor:
+                        order.status?.toLowerCase() === "delivered"
+                          ? "#4CAF50"
+                          : order.status?.toLowerCase() === "accepted"
+                          ? "#2196F3"
+                          : order.status?.toLowerCase() === "pending"
+                          ? "#FF9800"
+                          : "#757575",
+                    }}
+                  >
+                    {order.status}
+                  </span>
+                </td>
+                <td style={styles.tableCell}>
+                  {order.orderDate.toLocaleDateString()}
+                </td>
+                <td style={styles.tableCell}>
+                  {order.status?.toLowerCase() === "pending" && (
+                    <button
+                      onClick={() => handleApproveOrder(order.id)}
+                      style={{
+                        ...styles.actionButton,
+                        backgroundColor: "#3B82F6",
+                      }}
+                      disabled={loading}
+                    >
+                      Approve
+                    </button>
+                  )}
+                  {order.status?.toLowerCase() === "pending_for_approval" && (
+                    <button
+                      onClick={() => handleApproveOrder(order.id)}
+                      style={{
+                        ...styles.actionButton,
+                        backgroundColor: "#6366F1",
+                      }}
+                      disabled={loading}
+                    >
+                      Approve Now
+                    </button>
+                  )}
+                  {(order.status?.toLowerCase() === "accepted" &&
+                    !order.deliveryPartnerId) && (
+                    <button
+                      onClick={() => handleAssignClick(order)}
+                      style={{
+                        ...styles.actionButton,
+                        backgroundColor: "#F59E0B",
+                      }}
+                      disabled={loading}
+                    >
+                      Assign Partner
+                    </button>
+                  )}
+                  {order.deliveryPartnerName &&
+                    order.status?.toLowerCase() !== "delivered" && (
+                      <span
+                        style={{
+                          fontSize: "12px",
+                          color: "#10B981",
+                          display: "block",
+                          marginTop: "5px",
+                        }}
+                      >
+                        Assigned: {order.deliveryPartnerName}
+                      </span>
                     )}
-                </div>
-            </div>
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr style={styles.tableRow}>
+              <td
+                colSpan="6"
+                style={{ ...styles.tableCell, textAlign: "center" }}
+              >
+                No {title.toLowerCase()} found.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 
-            <button 
-                style={{ ...styles.button, ...styles.secondaryButton, marginBottom: '20px' }} 
-                onClick={handleExportOrdersToExcel}
-                disabled={loading || filteredOrders.length === 0}
-            >
-                {loading ? 'Processing...' : `EXPORT ${filteredOrders.length} ORDERS TO CSV`}
+  return (
+    <div style={styles.contentArea}>
+      <h2 style={styles.pageTitle}>Orders Overview</h2>
+
+      {/* Date Filter Section */}
+      <div style={styles.formCard}>
+        <h3 style={styles.cardTitle}>Search Orders by Date</h3>
+        <div style={styles.datePickerRow}>
+          <div style={styles.dateInputContainer}>
+            <input
+              type="date"
+              value={ordersStartDate}
+              onChange={(e) => setOrdersStartDate(e.target.value)}
+              style={styles.dateInput}
+            />
+          </div>
+          <div style={styles.dateInputContainer}>
+            <input
+              type="date"
+              value={ordersEndDate}
+              onChange={(e) => setOrdersEndDate(e.target.value)}
+              style={styles.dateInput}
+            />
+          </div>
+          {(ordersStartDate || ordersEndDate) && (
+            <button style={styles.clearButton} onClick={handleClearDates}>
+              ✕ Clear
             </button>
-            {/* 🌟 END: Added Date Filtering & Export UI 🌟 */}
-            
-            <div style={styles.tableCard}>
-                <table style={styles.dataTable}>
-                    <thead>
-                        <tr style={styles.tableHeaderRow}>
-                            <th style={styles.tableHeaderCell}>Order ID</th>
-                            <th style={styles.tableHeaderCell}>Customer/Store</th>
-                            <th style={styles.tableHeaderCell}>Bottles</th>
-                            <th style={styles.tableHeaderCell}>Status</th>
-                            <th style={styles.tableHeaderCell}>Order Date</th>
-                            <th style={styles.tableHeaderCell}>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {/* Use filteredOrders state for rendering */}
-                        {filteredOrders.length > 0 ? filteredOrders.map((order) => (
-                            <tr key={order.id} style={styles.tableRow}>
-                                <td style={styles.tableCell}>{order.id}</td>
-                                <td style={styles.tableCell}>{order.customerName}</td>
-                                <td style={styles.tableCell}>{order.bottles}</td>
-                                <td style={styles.tableCell}>
-                                    <span style={{
-                                        ...styles.activityStatusBadge, 
-                                        backgroundColor: order.status?.toLowerCase() === 'delivered' ? '#4CAF50' : 
-                                                         order.status?.toLowerCase() === 'accepted' ? '#2196F3' : 
-                                                         order.status?.toLowerCase() === 'pending' ? '#FF9800' :
-                                                         '#757575'
-                                    }}>
-                                        {order.status}
-                                    </span>
-                                </td>
-                                <td style={styles.tableCell}>{order.orderDate.toLocaleDateString()}</td>
-                                
-                                {/* 🌟 START: Updated Actions Cell for Approve/Assign 🌟 */}
-                                <td style={styles.tableCell}>
-                                    {order.status?.toLowerCase() === 'pending' && (
-                                        <button
-                                            onClick={() => handleApproveOrder(order.id)}
-                                            style={{ ...styles.actionButton, backgroundColor: '#3B82F6' }} // Blue for Approve
-                                            disabled={loading}
-                                        >
-                                            Approve
-                                        </button>
-                                    )}
-
-                                    {/* Assign button appears only for 'accepted' orders that haven't been assigned yet */}
-                                    {(order.status?.toLowerCase() === 'accepted' && !order.deliveryPartnerId) && (
-                                        <button
-                                            onClick={() => handleAssignClick(order)}
-                                            style={{ ...styles.actionButton, backgroundColor: '#F59E0B' }} // Orange for Assign
-                                            disabled={loading}
-                                        >
-                                            Assign Partner
-                                        </button>
-                                    )}
-
-                                    {/* Display assigned partner name if it exists (and not already delivered) */}
-                                    {order.deliveryPartnerName && order.status?.toLowerCase() !== 'delivered' && (
-                                        <span style={{ fontSize: '12px', color: '#10B981', display: 'block', marginTop: '5px' }}>
-                                            Assigned: {order.deliveryPartnerName}
-                                        </span>
-                                    )}
-                                </td>
-                                {/* 🌟 END: Updated Actions Cell 🌟 */}
-                            </tr>
-                        )) : (
-                            <tr style={styles.tableRow}><td colSpan="6" style={{...styles.tableCell, textAlign: 'center'}}>No orders found. Adjust your date filters.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-            <div style={{height: '1px'}} />
+          )}
         </div>
-    );
+      </div>
+
+      {/* Export Button */}
+      <button
+        style={{
+          ...styles.button,
+          ...styles.secondaryButton,
+          marginBottom: "20px",
+        }}
+        onClick={handleExportOrdersToExcel}
+        disabled={loading || filteredOrders.length === 0}
+      >
+        {loading
+          ? "Processing..."
+          : `EXPORT ${filteredOrders.length} ORDERS TO CSV`}
+      </button>
+
+      {/* 🟢 Pending and Pending for Approval Orders on Top */}
+      {renderTable(pendingForApprovalOrders, "Pending for Approval Orders", "#6366F1")}
+      {renderTable(pendingOrders, "Pending Orders", "#F59E0B")}
+      {renderTable(otherOrders, "All Other Orders")}
+    </div>
+  );
 };
-  
+
   const renderCreatePartner = () => {
     const assignedStoreIds = new Set();
     partners.forEach(partner => {
@@ -1690,6 +2051,247 @@ const handleViewPartnerDetails = (partner) => {
   );
 };
 
+// ==========================
+// 🔹 QR MANAGEMENT SECTION
+// ==========================
+const renderQrManagement = () => (
+  <div style={styles.contentArea}>
+    <h2 style={styles.pageTitle}>QR Management</h2>
+
+    {/* 🔹 Summary Cards */}
+    <div style={styles.kpiRow}>
+      <StatCard
+        label="Total Fresh Bottles in Warehouse"
+        value={freshBottlesWarehouse.toLocaleString()}
+        icon="💧"
+        bgColor="#E3F2FD"
+        textColor="#1565C0"
+      />
+      <StatCard
+        label="Total Unassigned Bottles"
+        value={unassignedBottles.length.toLocaleString()}
+        icon="📦"
+        bgColor="#FFF3E0"
+        textColor="#EF6C00"
+      />
+      <StatCard
+        label="Partners Available for Assignment"
+        value={approvedDeliveryPartners.length.toLocaleString()}
+        icon="🤝"
+        bgColor="#E8F5E9"
+        textColor="#388E3C"
+      />
+    </div>
+
+    {/* 🔹 Generate / Assign / Refresh Controls */}
+    <div style={styles.formCard}>
+      <h3 style={styles.cardTitle}>Generate & Assign QR Bottles</h3>
+      <div style={{ display: "flex", gap: "15px", flexWrap: "wrap" }}>
+        <button
+          style={{ ...styles.button, backgroundColor: "#1565C0", color: "#fff" }}
+          onClick={handleGenerateQR}
+          disabled={loading}
+        >
+          {loading ? "Generating..." : "Generate New QR"}
+        </button>
+
+        <button
+          style={{ ...styles.button, backgroundColor: "#2E7D32", color: "#fff" }}
+          onClick={() => setQrAssigning(true)}
+          disabled={unassignedBottles.length === 0}
+        >
+          Assign Bottles to Partner
+        </button>
+
+        {/* ✅ Refresh both bottles + summary */}
+        <button
+          style={{ ...styles.button, backgroundColor: "#6A1B9A", color: "#fff" }}
+          onClick={() => {
+            fetchUnassignedBottles();
+            fetchQrSummary();
+          }}
+        >
+          Refresh QR Data
+        </button>
+      </div>
+    </div>
+
+    {/* 🔹 QR Table */}
+    <div style={styles.tableCard}>
+      <h3 style={styles.cardTitle}>
+        Unassigned Bottles ({unassignedBottles.length})
+      </h3>
+
+      {unassignedBottles.length === 0 ? (
+        <p style={{ textAlign: "center", color: "#777", marginTop: "20px" }}>
+          No unassigned bottles found.
+        </p>
+      ) : (
+        <table style={styles.dataTable}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={styles.tableHeaderCell}>UUID</th>
+              <th style={styles.tableHeaderCell}>QR Code</th>
+              <th style={styles.tableHeaderCell}>Select</th>
+            </tr>
+          </thead>
+          <tbody>
+            {unassignedBottles.map((bottle) => (
+              <tr key={bottle.UUID} style={styles.tableRow}>
+                <td style={styles.tableCell}>{bottle.UUID}</td>
+
+                {/* ✅ QR Image + Buttons + Code */}
+                <td style={styles.tableCell}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                    }}
+                  >
+                    <QRCodeCanvas
+                      id={`qr-${bottle.UUID}`}
+                      value={bottle.qr_code}
+                      size={80}
+                      includeMargin={true}
+                    />
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "6px",
+                        marginTop: "6px",
+                        borderTop: "1px solid #eee",
+                        paddingTop: "4px",
+                      }}
+                    >
+                      {/* 📋 Copy Button */}
+                      <button
+                        style={{
+                          fontSize: "11px",
+                          padding: "4px 6px",
+                          border: "1px solid #ccc",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          backgroundColor: "#f9f9f9",
+                        }}
+                        onClick={() => {
+                          navigator.clipboard.writeText(bottle.qr_code);
+                          alert("QR code copied: " + bottle.qr_code);
+                        }}
+                      >
+                        📋 Copy
+                      </button>
+
+                      {/* ⬇️ Download Button */}
+                      {/* ⬇️ Download Button with QR + Text in Image */}
+                      <button
+                        style={{
+                          fontSize: "11px",
+                          padding: "4px 6px",
+                          border: "1px solid #ccc",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          backgroundColor: "#f9f9f9",
+                        }}
+                        onClick={() => {
+                          const qrCanvas = document.getElementById(`qr-${bottle.UUID}`);
+                          const qrCodeText = bottle.qr_code;
+
+                          // Create a new canvas to combine QR + text
+                          const combinedCanvas = document.createElement("canvas");
+                          const ctx = combinedCanvas.getContext("2d");
+
+                          const qrSize = 100; // match your QR size
+                          const padding = 20;
+                          const textHeight = 20;
+                          const totalHeight = qrSize + textHeight + padding;
+
+                          combinedCanvas.width = qrSize + padding;
+                          combinedCanvas.height = totalHeight;
+
+                          // Draw white background
+                          ctx.fillStyle = "#fff";
+                          ctx.fillRect(0, 0, combinedCanvas.width, combinedCanvas.height);
+
+                          // Draw the QR image
+                          ctx.drawImage(qrCanvas, padding / 2, padding / 2, qrSize, qrSize);
+
+                          // Draw QR code text below
+                          ctx.fillStyle = "#000";
+                          ctx.font = "14px Arial";
+                          ctx.textAlign = "center";
+                          ctx.fillText(
+                            qrCodeText,
+                            combinedCanvas.width / 2,
+                            qrSize + textHeight
+                          );
+
+                          // Download combined image
+                          const pngUrl = combinedCanvas
+                            .toDataURL("image/png")
+                            .replace("image/png", "image/octet-stream");
+                          const downloadLink = document.createElement("a");
+                          downloadLink.href = pngUrl;
+                          downloadLink.download = `${bottle.qr_code}.png`;
+                          document.body.appendChild(downloadLink);
+                          downloadLink.click();
+                          document.body.removeChild(downloadLink);
+                        }}
+                      >
+                        ⬇️ Download
+                      </button>
+
+                    </div>
+
+                    {/* ✅ Show QR Text Below for Manual Entry */}
+                    <p
+                      style={{
+                        fontSize: "13px",
+                        color: "#333",
+                        marginTop: "6px",
+                        fontWeight: "500",
+                        wordBreak: "break-all",
+                        textAlign: "center",
+                      }}
+                    >
+                      {bottle.qr_code}
+                    </p>
+                  </div>
+                </td>
+
+                {/* ✅ Selection Checkbox */}
+                <td style={styles.tableCell}>
+                  <input
+                    type="checkbox"
+                    checked={selectedBottlesToAssign.includes(bottle.qr_code)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedBottlesToAssign([
+                          ...selectedBottlesToAssign,
+                          bottle.qr_code,
+                        ]);
+                      } else {
+                        setSelectedBottlesToAssign(
+                          selectedBottlesToAssign.filter(
+                            (code) => code !== bottle.qr_code
+                          )
+                        );
+                      }
+                    }}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  </div>
+);
+
+
+
 
   const renderComplaints = () => {
   return (
@@ -1885,263 +2487,339 @@ const handleViewPartnerDetails = (partner) => {
 };
   
 // 🟢 RENDER QR MANAGEMENT FUNCTION 🟢
-const renderQrManagement = () => {
-    
-    const handleCopyQrCode = (text) => {
-        navigator.clipboard.writeText(text).then(() => {
-            alert(`QR Code copied to clipboard: ${text}`);
-        }).catch(err => {
-            console.error('Could not copy text: ', err);
-            alert('Failed to copy QR code.');
-        });
-    };
 
-    const handleToggleBottleSelection = (qr_code, checked) => {
-        setSelectedBottlesToAssign(prev => 
-            checked 
-                ? [...prev, qr_code] 
-                : prev.filter(qr => qr !== qr_code)
-        );
-    };
 
-    return (
-        <div style={styles.contentArea}>
-            <h2 style={styles.pageTitle}>QR Code Management</h2>
-
-            <div style={styles.formCard}>
-                <h3 style={styles.cardTitle}>Generate a new bottle</h3>
-                <button
-                    style={{...styles.button, ...styles.primaryButton}}
-                    onClick={handleGenerateQR}
-                    disabled={loading}
-                >
-                    {loading ? 'Generating...' : 'Generate New QR Code'}
-                </button>
-                {generatedQrData && (
-                    <div style={styles.generatedQrContainer}>
-                        <p style={styles.generatedQrText}>New QR Generated:</p>
-                        <div style={styles.qrCodeWrapper}>
-                            {/* NOTE: We use a placeholder image/text because React web QR libraries require installation */}
-                            <p style={styles.qrPlaceholder}>[QR Code: {generatedQrData.qr_code}]</p>
-                        </div>
-                        <p style={styles.generatedQrCode}>{generatedQrData.qr_code}</p>
-                        <button
-                            style={styles.copyButton}
-                            onClick={() => handleCopyQrCode(generatedQrData.qr_code)}
-                        >
-                            Copy QR Code
-                        </button>
-                    </div>
-                )}
-            </div>
-
-            <div style={styles.formCard}>
-                <h3 style={styles.cardTitle}>Assign Bottles to Delivery Partners</h3>
-                <p style={styles.reportLabel}>Select Bottles to Assign ({unassignedBottles.length} available):</p>
-                
-                <div style={styles.bottleList}>
-                    {unassignedBottles.length > 0 ? (
-                        unassignedBottles.map((bottle) => (
-                            <label key={bottle.UUID} style={styles.checkboxContainer}>
-                                <input
-                                    type="checkbox"
-                                    checked={selectedBottlesToAssign.includes(bottle.qr_code)}
-                                    onChange={(e) => handleToggleBottleSelection(bottle.qr_code, e.target.checked)}
-                                />
-                                <span style={styles.checkboxLabel}>{bottle.qr_code}</span>
-                            </label>
-                        ))
-                    ) : (
-                        <p style={styles.noDataText}>No unassigned bottles available.</p>
-                    )}
-                </div>
-
-                <button
-                    style={{...styles.button, ...styles.secondaryButton, backgroundColor: '#3B82F6', marginTop: '15px'}}
-                    onClick={() => selectedBottlesToAssign.length > 0 ? setQrAssigning(true) : alert('Please select at least one bottle.')}
-                    disabled={loading || selectedBottlesToAssign.length === 0}
-                >
-                    Assign Selected Bottles ({selectedBottlesToAssign.length})
-                </button>
-            </div>
-            
-             <AssignBottleModal 
-                isVisible={qrAssigning}
-                onClose={() => setQrAssigning(false)}
-                selectedBottlesToAssign={selectedBottlesToAssign}
-                approvedDeliveryPartners={approvedDeliveryPartners}
-                onAssign={handleAssignBottlesToPartner}
-                modalStyles={styles.modalStyles}
-            />
-        </div>
-    );
-};
 
 // 🟢 RENDER ACTIVE STORES LIST FUNCTION 🟢
 const renderActiveStoresList = () => {
-    if (loading) {
-      return <p style={styles.loadingText}>Loading active stores...</p>;
-    }
+  if (loading) {
+    return <p style={styles.loadingText}>Loading active stores...</p>;
+  }
 
-    const activeStores = stores; 
+  const activeStores = stores;
 
-    return (
-      <div style={styles.contentArea}>
-        <h2 style={styles.pageTitle}>Active Stores List ({activeStores.length})</h2>
-        <div style={styles.tableCard}>
-          {activeStores.length > 0 ? (
-            <table style={styles.dataTable}>
-              <thead>
-                <tr style={styles.tableHeaderRow}>
-                  <th style={styles.tableHeaderCell}>Store Name</th>
-                  <th style={styles.tableHeaderCell}>City</th>
-                  <th style={styles.tableHeaderCell}>Address</th>
-                  <th style={styles.tableHeaderCell}>Partner(s)</th>
-                  <th style={styles.tableHeaderCell}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activeStores.map((store) => {
-                  // Logic to find and list all partners associated with the store
-                  const assignedPartners = partners.filter(partner => 
-                    partner.stores.some(s => s.id === store.id)
-                  );
-                  const partnerNames = assignedPartners.map(p => p.full_name).join(', ') || 'N/A';
+  return (
+    <div style={styles.contentArea}>
+      <h2 style={styles.pageTitle}>
+        Active Stores List ({activeStores.length})
+      </h2>
 
-                  return (
-                    <tr key={store.id} style={styles.tableRow}>
-                      <td style={styles.tableCell}>{store.store_name}</td>
-                      <td style={styles.tableCell}>{store.city || 'N/A'}</td>
-                      <td style={styles.tableCell}>{store.address || 'N/A'}</td>
-                      <td style={styles.tableCell}>{partnerNames}</td>
-                      <td style={styles.tableCell}>
-                        <button 
-                          style={{...styles.actionButton, backgroundColor: '#00B8D9'}}
-                          onClick={() => alert(`Viewing details for store ${store.store_name}`)}
-                        >
-                          View Details
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <p style={{...styles.loadingText, marginTop: '20px', marginBottom: '20px'}}>
-              No active stores found.
-            </p>
-          )}
-        </div>
-        </div>
-    );
+      {/* Add New Store Form */}
+      <div style={styles.formCard}>
+        <h3 style={styles.cardTitle}>Add New Store</h3>
+        <form onSubmit={handleAddStore} style={styles.form}>
+          <input
+            style={styles.textInput}
+            type="text"
+            placeholder="Store Name"
+            value={newStoreName}
+            onChange={(e) => setNewStoreName(e.target.value)}
+            required
+          />
+          <input
+            style={styles.textInput}
+            type="text"
+            placeholder="City"
+            value={newStoreCity}
+            onChange={(e) => setNewStoreCity(e.target.value)}
+            required
+          />
+          <input
+            style={styles.textInput}
+            type="text"
+            placeholder="Address"
+            value={newStoreAddress}
+            onChange={(e) => setNewStoreAddress(e.target.value)}
+          />
+          <input
+            style={styles.textInput}
+            type="number"
+            step="any"
+            placeholder="Latitude"
+            value={newStoreLat}
+            onChange={(e) => setNewStoreLat(e.target.value)}
+          />
+          <input
+            style={styles.textInput}
+            type="number"
+            step="any"
+            placeholder="Longitude"
+            value={newStoreLong}
+            onChange={(e) => setNewStoreLong(e.target.value)}
+          />
+          <button
+            style={{ ...styles.button, ...styles.primaryButton }}
+            type="submit"
+            disabled={loading}
+          >
+            {loading ? "Adding..." : "Add Store"}
+          </button>
+        </form>
+      </div>
+
+      <div style={styles.tableCard}>
+        {activeStores.length > 0 ? (
+          <table style={styles.dataTable}>
+            <thead>
+              <tr style={styles.tableHeaderRow}>
+                <th style={styles.tableHeaderCell}>Store Name</th>
+                <th style={styles.tableHeaderCell}>City</th>
+                <th style={styles.tableHeaderCell}>Address</th>
+                <th style={styles.tableHeaderCell}>Latitude</th>
+                <th style={styles.tableHeaderCell}>Longitude</th>
+                <th style={styles.tableHeaderCell}>Partner(s)</th>
+                <th style={styles.tableHeaderCell}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeStores.map((store) => {
+                const assignedPartners = partners.filter((partner) =>
+                  partner.stores.some((s) => s.id === store.id)
+                );
+                const partnerNames =
+                  assignedPartners.map((p) => p.full_name).join(", ") || "N/A";
+
+                return (
+                  <tr key={store.id} style={styles.tableRow}>
+                    <td style={styles.tableCell}>{store.store_name}</td>
+                    <td style={styles.tableCell}>{store.city || "N/A"}</td>
+                    <td style={styles.tableCell}>{store.address || "N/A"}</td>
+                    <td style={styles.tableCell}>{store.latitude || "N/A"}</td>
+                    <td style={styles.tableCell}>{store.longitude || "N/A"}</td>
+                    <td style={styles.tableCell}>{partnerNames}</td>
+                    <td style={styles.tableCell}>
+                      <button
+                        style={{
+                          ...styles.actionButton,
+                          backgroundColor: "#00B8D9",
+                        }}
+                        onClick={() => {
+                          setSelectedStoreForDetails(store);
+                          setIsStoreDetailsModalVisible(true);
+                        }}
+                      >
+                        View Details
+                      </button>
+
+                      {/* Delete Store Button */}
+                      <button
+                        style={{
+                          ...styles.actionButton,
+                          backgroundColor: "#E74C3C",
+                          marginLeft: "8px",
+                        }}
+                        onClick={() => handleDeleteStore(store.id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <p
+            style={{
+              ...styles.loadingText,
+              marginTop: "20px",
+              marginBottom: "20px",
+            }}
+          >
+            No active stores found.
+          </p>
+        )}
+      </div>
+
+      {/* Store Details Modal */}
+      <StoreDetailsModal
+        isVisible={isStoreDetailsModalVisible}
+        onClose={() => setIsStoreDetailsModalVisible(false)}
+        store={selectedStoreForDetails}
+        partners={partners}
+        modalStyles={styles.modalStyles}
+      />
+    </div>
+  );
 };
 
 
-  const renderContent = () => {
-    switch (currentTab) {
-      case 'dashboard':
-        return renderDashboard();
-      case 'orders':
-        return renderOrders();
-      case 'createPartner':
-        return renderCreatePartner();
-      case 'myPartners':
-        return renderMyPartners();
-      case 'deliveryPartners':
-        return renderDeliveryPartners();
-      case 'complaints':
-        return renderComplaints(); 
-      case 'reports':
-        return renderReports(); 
-      case 'qrManagement':
-        return renderQrManagement();
-      case 'activeStoresList':
-        return renderActiveStoresList(); 
-      default:
-        return renderDashboard();
-    }
-  };
 
-  return (
-    <div style={styles.dashboardLayout}>
-      <Sidebar 
-        currentTab={currentTab} 
-        onSelectTab={handleSelectTab} 
-      />
-      <main style={styles.mainPanel}>
-        <header style={styles.topHeader}>
-          <h1 style={styles.headerTitle}>Super Admin Dashboard</h1>
-          <div style={styles.userProfile}>
-            <span style={styles.userName}>Admin User</span>
-            <button style={styles.logoutButton} onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-        </header>
-        <div style={styles.mainContentArea}>
-          {loading && currentTab === 'dashboard' ? (
-            <p style={styles.loadingText}>Loading dashboard data...</p>
-          ) : (
-            renderContent()
-          )}
-        </div>
-      </main>
-      
-      {/* --- MODAL SECTION --- */}
-      <SolutionModal 
-        isVisible={isSolutionModalVisible}
-        onClose={handleCloseModal}
-        onSubmit={handleSolutionSubmit}
-        complaintId={currentComplaintId}
-        solutionText={solutionText}
-        setSolutionText={setSolutionText}
-        isLoading={resolvingComplaint}
-        modalStyles={styles.modalStyles} 
-      />
-// ... inside SuperAdminDashboard's final return statement
-{/* ... renderOrders() call ... */}
 
-          <OrderAssignmentModal
-              isVisible={isOrderAssigningModalVisible}
-              onClose={() => setIsOrderAssigningModalVisible(false)}
-              order={orderToAssign}
-              approvedDeliveryPartners={approvedDeliveryPartners}
-              onSubmit={handleAssignOrderSubmit}
-              selectedPartnerId={selectedDeliveryPartnerId}
-              setSelectedPartnerId={setSelectedDeliveryPartnerId}
-              modalStyles={modalStyles} // Assuming modalStyles is available
-              styles={styles} // Assuming styles is available
-              isLoading={loading}
-          />
+  // ==========================
+// 🔹 RENDER CONTENT HANDLER
+// ==========================
+const renderContent = () => {
+  switch (currentTab) {
+    case "dashboard":
+      return renderDashboard();
+    case "orders":
+      return renderOrders();
+    case "createPartner":
+      return renderCreatePartner();
+    case "myPartners":
+      return renderMyPartners();
+    case "deliveryPartners":
+      return renderDeliveryPartners();
+    case "complaints":
+      return renderComplaints();
+    case "reports":
+      return renderReports();
+    case "qrManagement":
+      return renderQrManagement();
 
-      {/* --- QR ASSIGN BOTTLE MODAL --- */}
-      <AssignBottleModal 
-          isVisible={qrAssigning}
-          onClose={() => setQrAssigning(false)}
-          selectedBottlesToAssign={selectedBottlesToAssign}
-          approvedDeliveryPartners={approvedDeliveryPartners}
-          onAssign={handleAssignBottlesToPartner}
-          modalStyles={styles.modalStyles}
-      />
+    case "activeStoresList":
+      return renderActiveStoresList();
+    default:
+      return renderDashboard();
+  }
+};
 
-      {/* --- NEW PARTNER DETAILS MODAL --- */}
-      <PartnerDetailsModal
-        isVisible={isPartnerDetailsModalVisible}
-        onClose={() => setIsPartnerDetailsModalVisible(false)}
-        onApprove={handleApprovePartner}
-        partner={selectedPartnerForDetails}
-        isLoading={loading}
-        modalStyles={styles.modalStyles}
-      />
-    </div>
-  );
+// ==========================
+// 🔹 MAIN RETURN LAYOUT
+// ==========================
+return (
+  <>
+    {/* --- MAIN DASHBOARD LAYOUT --- */}
+    <div
+      className="dashboard-container"
+      style={{ display: "flex", height: "100vh", overflow: "hidden" }}
+    >
+      {/* --- SIDEBAR --- */}
+      {/* ✅ FIX: The Sidebar component is now self-closing (ends with />) 
+            All SidebarItem components have been removed from here. */}
+      <Sidebar className="sidebar" currentTab={currentTab} onSelectTab={handleSelectTab} />
+
+      {/* --- MAIN CONTENT --- */}
+      <div
+        className="dashboard-content"
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        {/* --- HEADER --- */}
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            backgroundColor: "#fff",
+            padding: "15px 25px",
+            borderRadius: "10px",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+            flexShrink: 0,
+            zIndex: 100,
+          }}
+        >
+          <h1 style={{ margin: 0, color: "#102a43", fontSize: "22px" }}>
+            Super Admin Dashboard
+          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ color: "#102a43", fontWeight: 500 }}>Admin User</span>
+            <button
+              style={{
+                backgroundColor: "#ff4d4f",
+                color: "#fff",
+                border: "none",
+                borderRadius: "6px",
+                padding: "8px 16px",
+                cursor: "pointer",
+                fontWeight: "bold",
+                transition: "background-color 0.3s",
+              }}
+              onClick={handleLogout}
+              onMouseOver={(e) => (e.target.style.backgroundColor = "#e04344")}
+              onMouseOut={(e) => (e.target.style.backgroundColor = "#ff4d4f")}
+            >
+              Logout
+            </button>
+          </div>
+        </header>
+
+        {/* --- MAIN BODY SECTION --- */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            backgroundColor: "#f4f6f8",
+            padding: "20px 25px",
+          }}
+        >
+          {loading && currentTab === "dashboard" ? (
+            <p
+              style={{
+                textAlign: "center",
+                color: "#888",
+                fontWeight: 500,
+                fontSize: "16px",
+                marginTop: "50px",
+              }}
+            >
+              Loading dashboard data...
+            </p>
+          ) : (
+            renderContent()
+          )}
+        </div>
+      </div>
+    </div>
+
+    {/* --- GLOBAL MODALS SECTION --- */}
+    <SolutionModal
+      isVisible={isSolutionModalVisible}
+      onClose={handleCloseModal}
+      onSubmit={handleSolutionSubmit}
+      complaintId={currentComplaintId}
+      solutionText={solutionText}
+      setSolutionText={setSolutionText}
+      isLoading={resolvingComplaint}
+      modalStyles={styles.modalStyles}
+    />
+
+    <OrderAssignmentModal
+      isVisible={isOrderAssigningModalVisible}
+      onClose={() => setIsOrderAssigningModalVisible(false)}
+      order={orderToAssign}
+      approvedDeliveryPartners={approvedDeliveryPartners}
+      onSubmit={handleAssignOrderSubmit}
+      selectedPartnerId={selectedDeliveryPartnerId}
+      setSelectedPartnerId={setSelectedDeliveryPartnerId}
+      modalStyles={styles.modalStyles}
+      styles={styles}
+      isLoading={loading}
+    />
+
+    <AssignBottleModal
+      isVisible={qrAssigning}
+      onClose={() => setQrAssigning(false)}
+      selectedBottlesToAssign={selectedBottlesToAssign}
+      approvedDeliveryPartners={approvedDeliveryPartners}
+      onAssign={handleAssignBottlesToPartner}
+      modalStyles={styles.modalStyles}
+    />
+
+    <PartnerDetailsModal
+      isVisible={isPartnerDetailsModalVisible}
+      onClose={() => setIsPartnerDetailsModalVisible(false)}
+      onApprove={handleApprovePartner}
+      partner={selectedPartnerForDetails}
+      isLoading={loading}
+      modalStyles={styles.modalStyles}
+    />
+  </>
+);
 };
 
 const styles = {
   dashboardLayout: {
     display: 'flex',
     minHeight: '100vh',
+    height: '100vh', // full screen height
+    width: '100vw',
     backgroundColor: '#F0F2F5', 
     fontFamily: "'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
   },
@@ -2202,6 +2880,7 @@ const styles = {
     flexGrow: 1,
     display: 'flex',
     flexDirection: 'column',
+    overflow: 'hidden',
   },
   topHeader: {
     backgroundColor: '#FFFFFF',
@@ -2240,8 +2919,9 @@ const styles = {
   },
   mainContentArea: {
     flexGrow: 1,
-    padding: '30px',
+    padding: '20px 30px',
     overflowY: 'auto',
+    backgroundColor: '#F8FAFC',
   },
   loadingText: {
     textAlign: 'center',
@@ -2713,7 +3393,119 @@ modalSubtitle: {
     borderRadius: '8px',
     border: '1px solid #DDD',
     backgroundColor: '#F8F8F8',
-  }
+  },
+modalStyles: {
+    backdrop: {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: "rgba(0,0,0,0.6)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 1000,
+    },
+    modal: {
+      backgroundColor: "#FFFFFF",
+      padding: "30px",
+      borderRadius: "12px",
+      width: "400px",
+      maxWidth: "90%",
+      boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+    },
+    title: {
+      fontSize: "20px",
+      fontWeight: "600",
+      color: "#333",
+      marginBottom: "20px",
+    },
+    textarea: {
+      width: "100%",
+      padding: "10px",
+      borderRadius: "6px",
+      border: "1px solid #DCE0E6",
+      fontSize: "15px",
+      resize: "vertical",
+      marginBottom: "20px",
+      outline: "none",
+    },
+    actions: {
+      display: "flex",
+      justifyContent: "flex-end",
+      gap: "10px",
+    },
+    cancelButton: {
+      padding: "10px 18px",
+      borderRadius: "6px",
+      border: "1px solid #CCC",
+      backgroundColor: "#F5F5F5",
+      color: "#333",
+      cursor: "pointer",
+    },
+    submitButton: {
+      padding: "10px 18px",
+      borderRadius: "6px",
+      border: "none",
+      backgroundColor: "#4CAF50",
+      color: "#FFFFFF",
+      fontWeight: "600",
+      cursor: "pointer",
+    },
+  },
+  modalSubtitle: {
+    fontSize: "16px",
+    color: "#6B7280",
+    marginBottom: "20px",
+    textAlign: "left",
+    borderBottom: "1px solid #EEE",
+    paddingBottom: "15px",
+  },
+  detailsGrid: {
+    display: "flex",
+    flexDirection: "row",
+    gap: "20px",
+  },
+  detailsColumn: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  detailItem: {
+    display: "flex",
+    flexDirection: "column",
+  },
+  detailLabel: {
+    fontSize: "13px",
+    fontWeight: "600",
+    color: "#555",
+    margin: "0 0 4px 0",
+  },
+  detailValue: {
+    fontSize: "15px",
+    color: "#333",
+    margin: "0",
+    wordBreak: "break-word",
+  },
+  imageItem: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "5px",
+  },
+  detailImage: {
+    width: "100%",
+    maxWidth: "250px",
+    height: "auto",
+    borderRadius: "8px",
+    border: "1px solid #DDD",
+    backgroundColor: "#F8F8F8",
+  },
+
+
+  
+
     
 };
 

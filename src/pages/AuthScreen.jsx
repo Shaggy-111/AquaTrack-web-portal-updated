@@ -1,18 +1,17 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { API_BASE_URL } from '../config'; // ✅ Single source of truth for backend URL
 
-// Using a publicly accessible URL for the image to prevent module resolution errors.
-const LOGIN_BACKGROUND_IMAGE_URL = 'https://user-gen-media-assets.s3.amazonaws.com/seedream_images/0f5b0114-24a6-420f-9d7b-27fa48a799f5.png';
-
-const API_BASE_URL = 'https://aquatrack-backend.fly.dev'; // Your local backend URL
+const LOGIN_BACKGROUND_IMAGE_URL =
+  'https://user-gen-media-assets.s3.amazonaws.com/seedream_images/0f5b0114-24a6-420f-9d7b-27fa48a799f5.png';
 
 const AuthScreen = () => {
   const { role } = useParams(); // 'superadmin' or 'partner'
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState(''); // State for handling login errors
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const displayRole = role === 'superadmin' ? 'Super Admin' : 'Partner (Store/POC)';
@@ -26,23 +25,42 @@ const AuthScreen = () => {
       const payload = {
         username: email,
         password: password,
-        role: role
+        role: role,
       };
 
+      // ✅ Use dynamic API base URL from config.js
       const response = await axios.post(`${API_BASE_URL}/auth/login`, payload);
 
-      const { access_token, user_role } = response.data;
+      const { access_token, token, user_role } = response.data;
 
-      // Use a conditional key to store the token.
-      const tokenKey = user_role === 'superadmin' ? 'userToken' : 'partner_token';
-      localStorage.setItem(tokenKey, access_token);
+      // 🧠 Fallback logic for different backend token keys
+      const finalToken = access_token || token;
+      if (!finalToken) throw new Error('Token not found in response.');
 
-      // Navigate to the correct dashboard based on the server response.
-      navigate(`/dashboard/${user_role}`);
+      // ✅ Store under all possible keys for compatibility
+      localStorage.setItem('auth_token', finalToken);
+      localStorage.setItem('userToken', finalToken);
+      localStorage.setItem('partner_token', finalToken);
+      localStorage.setItem('user_role', user_role);
 
+      // ✅ Navigate based on role
+      if (user_role === 'superadmin') {
+        navigate('/dashboard/superadmin');
+      } else if (user_role === 'partner') {
+        navigate('/dashboard/partner');
+      } else {
+        alert('Unknown role. Please contact admin.');
+      }
     } catch (err) {
       console.error('Login failed:', err.response?.data || err.message);
-      setError('Invalid email or password. Please try again.');
+
+      if (err.response?.status === 401) {
+        setError('Invalid email or password. Please try again.');
+      } else if (err.message.includes('Network Error')) {
+        setError('Network error. Please check your internet connection.');
+      } else {
+        setError('Login failed. Please try again later.');
+      }
     } finally {
       setLoading(false);
     }
@@ -59,21 +77,32 @@ const AuthScreen = () => {
           <div style={authStyles.roleSelectionTabs}>
             <button
               type="button"
-              style={{ ...authStyles.roleTab, ...(role === 'superadmin' ? authStyles.activeTab : {}) }}
+              style={{
+                ...authStyles.roleTab,
+                ...(role === 'superadmin' ? authStyles.activeTab : {}),
+              }}
               onClick={() => handleSwitchRole('superadmin')}
             >
               Super Admin
             </button>
             <button
               type="button"
-              style={{ ...authStyles.roleTab, ...(role === 'partner' ? authStyles.activeTab : {}) }}
+              style={{
+                ...authStyles.roleTab,
+                ...(role === 'partner' ? authStyles.activeTab : {}),
+              }}
               onClick={() => handleSwitchRole('partner')}
             >
               Partner (Store/POC)
             </button>
           </div>
-          <h2 style={authStyles.formTitle}>Welcome back! Please login to your {displayRole} account</h2>
+
+          <h2 style={authStyles.formTitle}>
+            Welcome back! Please login to your {displayRole} account
+          </h2>
+
           {error && <p style={authStyles.errorText}>{error}</p>}
+
           <div style={authStyles.form}>
             <input
               type="email"
@@ -95,9 +124,15 @@ const AuthScreen = () => {
               <label style={authStyles.checkboxLabel}>
                 <input type="checkbox" style={authStyles.checkbox} /> Remember me
               </label>
-              <a href="#" style={authStyles.forgotPassword}>Forgot password?</a>
+              <a href="#" style={authStyles.forgotPassword}>
+                Forgot password?
+              </a>
             </div>
-            <button type="submit" style={authStyles.loginButton} disabled={loading}>
+            <button
+              type="submit"
+              style={authStyles.loginButton}
+              disabled={loading}
+            >
               {loading ? 'Logging in...' : 'Login'}
             </button>
           </div>
@@ -112,7 +147,6 @@ const authStyles = {
     display: 'flex',
     minHeight: '100vh',
     fontFamily: 'Arial, sans-serif',
-    // Use the public URL for the background image
     backgroundImage: `url(${LOGIN_BACKGROUND_IMAGE_URL})`,
     backgroundSize: 'cover',
     backgroundPosition: 'center',
@@ -202,9 +236,7 @@ const authStyles = {
     alignItems: 'center',
     gap: '5px',
   },
-  checkbox: {
-    marginRight: '5px',
-  },
+  checkbox: { marginRight: '5px' },
   forgotPassword: {
     color: '#007bff',
     textDecoration: 'none',

@@ -2,20 +2,29 @@ import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { API_BASE_URL } from './config';
+import QrReader from "react-qr-reader-es6";
+
+import Modal from "react-modal";
+import { QRCodeCanvas } from "qrcode.react";
+
+
+
 // We are temporarily removing chart imports to focus on UI structure,
 // but they can be re-added if you reinstall the chart library.
 
 // --- Configuration ---
-const API_BASE_URL = 'https://aquatrack-backend.fly.dev';
+
 const BOTTLE_PRICE = 42;
 
 // --- Helper Functions ---
 const backendToUiStatus = (s) => {
-    if (s === 'pending') return 'Pending';
-    if (s === 'in_progress' || s === 'accepted') return 'In Transit';
-    if (s === 'delivered') return 'Delivered';
-    if (s === 'cancelled') return 'Cancelled';
-    return 'Pending';
+  if (s === 'pending') return 'Pending';
+  if (s === 'in_progress' || s === 'accepted') return 'In Transit';
+  if (s === 'delivered_pending_confirmation') return 'Awaiting Confirmation';
+  if (s === 'delivered_confirmed' || s === 'delivered') return 'Delivered';
+  if (s === 'cancelled') return 'Cancelled';
+  return 'Pending';
 };
 
 // FIX: Helper to ensure the report link is an absolute URL
@@ -140,6 +149,11 @@ const PartnerDashboard = () => {
     const [pendingOrders, setPendingOrders] = useState(0);
     const [deliveredOrders, setDeliveredOrders] = useState(0);
     const [emptyBottleCount, setEmptyBottleCount] = useState(0);
+    // 🧴 Empty Bottles State
+    const [emptyBottles, setEmptyBottles] = useState([]);
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
+    const [scannedQr, setScannedQr] = useState("");
+
 
     const [reports, setReports] = useState([]);
     const [reportsLoading, setReportsLoading] = useState(true);
@@ -161,6 +175,14 @@ const PartnerDashboard = () => {
     const [deliveredToday, setDeliveredToday] = useState(0);
     const [deliveredThisMonth, setDeliveredThisMonth] = useState(0);
     const [lastFiveOrders, setLastFiveOrders] = useState([]); // NEW state for Recent Activity
+
+
+    // --- QR MODAL STATES ---
+    const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+    const [scannedQRCode, setScannedQRCode] = useState("");
+    const [manualQRCode, setManualQRCode] = useState("");
+    const [qrError, setQrError] = useState(null);
+
 
     // 🟢 NEW DATA AGGREGATION FOR CHART 🟢
     const getMonthlyOrderData = useMemo(() => {
@@ -255,43 +277,63 @@ const PartnerDashboard = () => {
     };
 
 
-    const fetchEmptyBottles = async (token) => {
-        try {
-            const response = await axios.get(`${API_BASE_URL}/bottle/partner/me/empty-bottles`, {
-                headers: { 'Authorization': `Bearer ${token}` },
-            });
-            if (typeof response.data === 'number') {
-                setEmptyBottleCount(response.data);
-            } else {
-                console.error('Invalid empty bottles response:', response.data);
-                setEmptyBottleCount(0);
-            }
-        } catch (error) {
-            console.error('Failed to fetch empty bottles:', error);
-            setEmptyBottleCount(0);
-        }
-    };
+    // ======================
+// 🔹 Fetch Bottles at Store (Previously Empty Bottles)
+// ======================
+const fetchEmptyBottles = async (token) => {
+  try {
+    // Temporary: use existing backend endpoint
+    const response = await axios.get(`${API_BASE_URL}/bottle/partner/me/empty-bottles`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-    useEffect(() => {
-        const checkTokenAndFetchData = async () => {
-            setLoading(true);
-            const token = localStorage.getItem('partner_token');
+    // Handle both list and count responses
+    if (Array.isArray(response.data)) {
+      setEmptyBottleCount(response.data.length);
+      setEmptyBottles(response.data);
+    } else if (typeof response.data === "number") {
+      setEmptyBottleCount(response.data);
+      setEmptyBottles([]);
+    } else {
+      console.error("⚠️ Unexpected response:", response.data);
+      setEmptyBottleCount(0);
+      setEmptyBottles([]);
+    }
+  } catch (error) {
+    console.error("❌ Failed to fetch empty bottles:", error);
+    setEmptyBottleCount(0);
+    setEmptyBottles([]);
+  }
+};
 
-            if (!token) {
-                alert('Session Expired: Please log in again.');
-                navigate('/login/partner');
-                setLoading(false);
-                return;
-            }
 
-            fetchData(token);
-            fetchComplaints(token);
-            fetchReports(token);
-            fetchEmptyBottles(token);
-        };
+// ======================
+// 🔹 Use Effect (Token Check + Data Fetch)
+// ======================
+useEffect(() => {
+  const checkTokenAndFetchData = async () => {
+    setLoading(true);
+    const token = localStorage.getItem("partner_token");
 
-        checkTokenAndFetchData();
-    }, [navigate]);
+    if (!token) {
+      alert("Session Expired: Please log in again.");
+      navigate("/login/partner");
+      setLoading(false);
+      return;
+    }
+
+    // Fetch all relevant data
+    fetchData(token);
+    fetchComplaints(token);
+    fetchReports(token);
+    fetchEmptyBottles(token);
+
+    setLoading(false);
+  };
+
+  checkTokenAndFetchData();
+}, [navigate]);
+
 
     const fetchData = async (token) => {
         try {
@@ -318,15 +360,22 @@ const PartnerDashboard = () => {
 
             const ordersData = ordersResponse.data;
 
-            const formattedOrders = (ordersData || []).map((order) => ({
-                id: order.id.toString(),
-                bottles: parseInt(order.order_details, 10),
-                status: backendToUiStatus(order.status),
-                orderDate: new Date(order.created_at),
-                customerName: order.store?.store_name || 'Store',
-                isPartnerOrder: true,
-                partnerName: order.partner ? order.partner.full_name : 'Partner',
-            }));
+            const formattedOrders = (ordersData || []).map((order) => ({
+                id: order.id.toString(),
+                bottles: parseInt(order.order_details, 10),
+                status:
+                    order.status === "delivered_pending_confirmation"
+                        ? "Awaiting Confirmation"
+                        : backendToUiStatus(order.status),
+                orderDate: new Date(order.created_at),
+                customerName: order.store?.store_name || "Store",
+                partnerName: order.partner ? order.partner.full_name : "Partner",
+                deliveryPhotoUrl: order.delivery_photo_url ? `${API_BASE_URL}${order.delivery_photo_url}` : null,
+                bottlesDelivered: order.bottles_delivered || 0,
+                confirmedBottles: order.confirmed_bottles || 0,
+                confirmationRemarks: order.confirmation_remarks || "",
+            }));
+
 
             setMyOrders(formattedOrders);
             setFilteredOrders(formattedOrders);
@@ -523,6 +572,64 @@ const PartnerDashboard = () => {
             setLoading(false);
         }
     };
+    const handleConfirmDelivery = async (orderId, confirmedBottles, remarks) => {
+        const token = localStorage.getItem("partner_token");
+        if (!token) {
+            alert("Please log in again.");
+            navigate("/login/partner");
+            return;
+        }
+
+        try {
+            const response = await axios.put(
+                `${API_BASE_URL}/partners/partners/partner/orders/${orderId}/confirm-delivery`,
+                {
+                    confirmed_bottles: confirmedBottles || 0,
+                    confirmation_remarks: remarks || "",
+                },
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                }
+            );
+
+            if (response.status === 200) {
+                alert("✅ Delivery confirmed successfully!");
+                fetchData(token); // Refresh
+            }
+        } catch (error) {
+            console.error("Confirm Error:", error.response?.data || error.message);
+            alert(error.response?.data?.detail || "Failed to confirm delivery.");
+        }
+    };
+
+    // 🟢 Handle successful QR scan
+    const handleQRScan = (data) => {
+        if (data) {
+            setScannedQRCode(data);
+            setManualQRCode(data);
+            setIsQRModalOpen(false);
+            alert(`✅ QR Scanned: ${data}`);
+        }
+    };
+
+    // 🟠 Handle QR scanning error
+    const handleQRError = (err) => {
+        console.error("QR Scan Error:", err);
+        setQrError("Unable to access camera. Please check permissions or try manual entry.");
+    };
+
+    // 🔵 Manually submit QR code
+    const handleManualQRSubmit = () => {
+        if (!manualQRCode.trim()) {
+            alert("Please enter or scan a QR code.");
+            return;
+        }
+        alert(`✅ QR submitted: ${manualQRCode}`);
+        setIsQRModalOpen(false);
+        setManualQRCode("");
+    };
+
+
 
     const handleRaiseComplaint = async (e) => {
         e.preventDefault();
@@ -787,6 +894,60 @@ const PartnerDashboard = () => {
         </div>
     );
 
+   const renderEmptyBottles = () => (
+  <div style={styles.contentArea}>
+    <h2 style={styles.pageTitle}>🧴 Bottles Currently at Stores</h2>
+
+    <div style={styles.tableCard}>
+      <h3 style={styles.cardTitle}>
+        Bottles at Store ({emptyBottles.length})
+      </h3>
+
+      {emptyBottles.length === 0 ? (
+        <p style={{ textAlign: "center", color: "#777", marginTop: "20px" }}>
+          No bottles currently at stores.
+        </p>
+      ) : (
+        <table style={styles.dataTable}>
+          <thead>
+            <tr style={styles.tableHeaderRow}>
+              <th style={styles.tableHeaderCell}>#</th>
+              <th style={styles.tableHeaderCell}>Store Name</th>
+              <th style={styles.tableHeaderCell}>QR Code</th>
+              <th style={styles.tableHeaderCell}>QR Image</th>
+            </tr>
+          </thead>
+          <tbody>
+            {emptyBottles.map((bottle, index) => (
+              <tr key={bottle.qr_code || index} style={styles.tableRow}>
+                <td style={styles.tableCell}>{index + 1}</td>
+                <td style={styles.tableCell}>
+                  {bottle.store_name || "N/A"}
+                </td>
+                <td style={styles.tableCell}>
+                  {bottle.qr_code || "Not Available"}
+                </td>
+                <td style={styles.tableCell}>
+                  {bottle.qr_code ? (
+                    <QRCodeCanvas
+                      value={bottle.qr_code}
+                      size={60}
+                      includeMargin={true}
+                    />
+                  ) : (
+                    <span style={{ color: "#888" }}>N/A</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  </div>
+);
+
+
 
     const renderMyOrders = () => (
         <div style={styles.listContainer}>
@@ -815,6 +976,59 @@ const PartnerDashboard = () => {
                 {loading ? 'Exporting...' : 'Export All Orders'}
             </button>
             <div style={styles.itemCard}>
+                {/* --- Pending Confirmation Section --- */}
+                {filteredOrders.some((o) => o.status === "Awaiting Confirmation") && (
+                    <div style={{ marginBottom: 30 }}>
+                        <h3 style={styles.formTitle}>Awaiting Store Confirmation</h3>
+                        {filteredOrders
+                            .filter((o) => o.status === "Awaiting Confirmation")
+                            .map((order) => (
+                                <div key={order.id} style={{ ...styles.itemCard, background: "#fff7ed", border: "1px solid #f59e0b" }}>
+                                    <p><strong>Order ID:</strong> {order.id}</p>
+                                    <p><strong>Bottles Delivered:</strong> {order.bottlesDelivered}</p>
+                                    {order.deliveryPhotoUrl && (
+                                        <img
+                                            src={order.deliveryPhotoUrl}
+                                            alt="Delivery Proof"
+                                            style={{ width: "100%", borderRadius: 8, marginBottom: 10 }}
+                                        />
+                                    )}
+                                    <textarea
+                                        placeholder="Remarks (optional)"
+                                        style={{ ...styles.textInput, height: 80 }}
+                                        onChange={(e) => (order._remarks = e.target.value)}
+                                    />
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        placeholder="Confirm bottles"
+                                        style={{ ...styles.textInput, width: "50%" }}
+                                        onChange={(e) => (order._bottlesConfirmed = e.target.value)}
+                                    />
+                                    <button
+                                        onClick={() =>
+                                            handleConfirmDelivery(order.id, order._bottlesConfirmed, order._remarks)
+                                        }
+                                        style={{
+                                            ...styles.button,
+                                            backgroundColor: "#00A896",
+                                            marginTop: 10,
+                                        }}
+                                    >
+                                        Confirm Delivery ✅
+                                    </button>
+                                </div>
+                            ))}
+                    </div>
+                )}
+
+                <button
+                    style={{ ...styles.button, backgroundColor: "#00A896", marginBottom: "15px" }}
+                    onClick={() => setIsQRModalOpen(true)}
+                >
+                    📷 Scan QR / Enter Manually
+                </button>
+
                 <h3 style={styles.formTitle}>All Orders</h3>
                 {filteredOrders.length === 0 ? (
                     <p style={styles.noDataText}>No orders found for the selected dates.</p>
@@ -835,12 +1049,14 @@ const PartnerDashboard = () => {
                                     <td style={styles.tableCell}>{new Date(order.orderDate).toLocaleDateString()}</td>
                                     <td style={styles.tableCell}>{order.bottles}</td>
                                     <td style={styles.tableCell}>
-                                        <span style={{
-                                            ...styles.statusBadge,
-                                            backgroundColor: order.status === 'Delivered' ? '#00A896' : // Teal 
-                                                                order.status === 'In Transit' ? '#F4B400' : // Yellow
-                                                                order.status === 'Pending' ? '#E74C3C' : '#34495E' // Red/Grey
-                                            }}>
+                                        <span style={{
+                                            ...styles.statusBadge,
+                                            backgroundColor: order.status === 'Delivered' ? '#00A896' :
+                                                order.status === 'Awaiting Confirmation' ? '#f59e0b' :
+                                                    order.status === 'In Transit' ? '#F4B400' :
+                                                        order.status === 'Pending' ? '#E74C3C' :
+                                                            '#34495E'
+                                        }}>
                                             {order.status}
                                         </span>
                                     </td>
@@ -999,20 +1215,6 @@ const PartnerDashboard = () => {
     );
 
 
-    const renderEmptyBottles = () => (
-        <div style={styles.scrollContent}>
-            <div style={styles.cardContainer}>
-                <h2 style={styles.pageTitle}>Empty Bottle Management</h2>
-                <div style={styles.formCard}>
-                    <h3 style={styles.formTitle}>Current Empty Bottles</h3>
-                    <p style={styles.emptyBottleCountText}>{emptyBottleCount}</p>
-                    <p style={styles.itemDetails}>
-                        This is the current count of empty bottles you have in your inventory. This count is used to manage pickups.
-                    </p>
-                </div>
-            </div>
-        </div>
-    );
 
 
     const renderTestReports = () => (
@@ -1058,49 +1260,109 @@ const PartnerDashboard = () => {
         </div>
     );
 
-    const renderMainContent = () => {
-        if (loading) {
-            return (
-                <div style={styles.loadingContainer}>
-                    <p style={styles.loadingText}>Loading...</p>
-                </div>
-            );
-        }
-        switch (currentTab) {
-            case 'dashboard':
-                return renderDashboard();
-            case 'myOrders':
-                return renderMyOrders();
-            case 'placeOrder':
-                return renderPlaceOrder();
-            case 'complaints':
-                return renderComplaints();
-            case 'emptyBottles':
-                return renderEmptyBottles();
-            case 'testReports':
-                return renderTestReports();
-            default:
-                return <p style={styles.errorText}>Something went wrong!</p>;
-        }
-    };
+   const renderMainContent = () => {
+  if (loading) {
+    return (
+      <div style={styles.loadingContainer}>
+        <p style={styles.loadingText}>Loading...</p>
+      </div>
+    );
+  }
 
-    return (
-        <div style={styles.dashboardLayout}>
-            <Sidebar currentTab={currentTab} onSelectTab={handleSelectTab} />
-            <main style={styles.mainPanel}>
-                <header style={styles.topHeader}>
-                    <h1 style={styles.headerTitle}>Partner Dashboard</h1>
-                    <button style={styles.headerLogoutButton} onClick={handleLogout}>
-                        <span style={{ marginRight: '8px' }}>🚪</span>Logout
-                    </button>
-                </header>
-                <div style={styles.mainContentArea}>
-                    {renderMainContent()}
-                </div>
-            </main>
-            </div>
-    );
+  switch (currentTab) {
+    case 'dashboard':
+      return renderDashboard();
+    case 'myOrders':
+      return renderMyOrders();
+    case 'placeOrder':
+      return renderPlaceOrder();
+    case 'complaints':
+      return renderComplaints();
+    case 'emptyBottles':
+      return renderEmptyBottles();
+    case 'testReports':
+      return renderTestReports();
+    default:
+      return <p style={styles.errorText}>Something went wrong!</p>;
+  }
 };
+
+return (
+  <div style={styles.dashboardLayout}>
+    <Sidebar currentTab={currentTab} onSelectTab={handleSelectTab} />
+    <main style={styles.mainPanel}>
+      <header style={styles.topHeader}>
+        <h1 style={styles.headerTitle}>Partner Dashboard</h1>
+        <button style={styles.headerLogoutButton} onClick={handleLogout}>
+          <span style={{ marginRight: '8px' }}>🚪</span>Logout
+        </button>
+      </header>
+
+      {/* --- MAIN CONTENT --- */}
+      <div style={styles.mainContentArea}>
+        {renderMainContent()}
+      </div>
+
+      {/* --- 🟢 QR SCANNER MODAL --- */}
+      <Modal
+        isOpen={isQRModalOpen}
+        onRequestClose={() => setIsQRModalOpen(false)}
+        contentLabel="QR Scanner"
+        style={{
+          overlay: { backgroundColor: "rgba(0,0,0,0.6)", zIndex: 1000 },
+          content: {
+            width: "400px",
+            margin: "auto",
+            borderRadius: "10px",
+            padding: "20px",
+            background: "#fff",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+          },
+        }}
+      >
+        <h3 style={{ textAlign: "center", marginBottom: "15px" }}>Scan QR Code</h3>
+
+        <div style={{ textAlign: "center", marginBottom: "10px" }}>
+          <QrReader
+            delay={300}
+            onError={handleQRError}
+            onScan={handleQRScan}
+            style={{ width: "100%", borderRadius: "8px" }}
+          />
+        </div>
+
+        {qrError && <p style={{ color: "red", textAlign: "center" }}>{qrError}</p>}
+
+        <p style={{ textAlign: "center", margin: "10px 0", fontWeight: "bold" }}>OR</p>
+
+        <input
+          type="text"
+          placeholder="Enter QR Code manually"
+          value={manualQRCode}
+          onChange={(e) => setManualQRCode(e.target.value)}
+          style={{ ...styles.textInput, marginBottom: "10px" }}
+        />
+
+        <button
+          style={{ ...styles.button, backgroundColor: "#00A896", marginBottom: "10px" }}
+          onClick={handleManualQRSubmit}
+        >
+          Submit
+        </button>
+
+        <button
+          style={{ ...styles.button, backgroundColor: "#E74C3C" }}
+          onClick={() => setIsQRModalOpen(false)}
+        >
+          Close
+        </button>
+      </Modal>
+      {/* --- 🟢 END QR SCANNER MODAL --- */}
+    </main>
+  </div>
+);
+};
+
 
 const styles = {
     // --- CORE LAYOUT AND HEADER STYLES ---
