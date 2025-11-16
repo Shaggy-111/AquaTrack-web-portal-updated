@@ -362,6 +362,8 @@ const SuperAdminDashboard = () => {
   const [currentComplaintId, setCurrentComplaintId] = useState(null);
   const [solutionText, setSolutionText] = useState("");
   const [resolvingComplaint, setResolvingComplaint] = useState(false);
+  const [bulkCount, setBulkCount] = useState(1);
+  const [loadingBulk, setLoadingBulk] = useState(false);
 
   // --- Partner Details Modal ---
   const [isPartnerDetailsModalVisible, setIsPartnerDetailsModalVisible] =
@@ -1363,6 +1365,66 @@ const handleReportDownload = async (reportId) => {
   }
 };
 
+const handleBulkGenerateQR = async () => {
+  if (!bulkCount || bulkCount < 1) {
+    alert("Enter a valid number of QR codes.");
+    return;
+  }
+
+  setLoadingBulk(true);
+
+  const token =
+    accessToken ||
+    localStorage.getItem("auth_token") ||
+    localStorage.getItem("userToken") ||
+    localStorage.getItem("partner_token");
+
+  try {
+    const res = await axios.post(
+      `${API_BASE_URL}/bottle/superadmin/generate-qr?count=${bulkCount}`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    alert(res.data.message);
+    fetchQrData(); // Refresh summary after generation
+  } catch (error) {
+    console.error(error);
+    alert("Bulk QR generation failed");
+  } finally {
+    setLoadingBulk(false);
+  }
+};
+const handleDownloadBulkQR = async () => {
+  const token =
+    accessToken ||
+    localStorage.getItem("auth_token") ||
+    localStorage.getItem("userToken") ||
+    localStorage.getItem("partner_token");
+
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}/bottle/superadmin/download-qr`,
+      {
+        responseType: "blob",
+        headers: { Authorization: `Bearer ${token}` }
+      }
+    );
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `bulk_qr_${Date.now()}.zip`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } catch (error) {
+    console.error(error);
+    alert("Download failed");
+  }
+};
+
+
 // ------------------------------------------
 // --- COMPLAINT RESOLUTION HANDLERS ---
 // ------------------------------------------
@@ -2087,6 +2149,7 @@ const renderQrManagement = () => (
     <div style={styles.formCard}>
       <h3 style={styles.cardTitle}>Generate & Assign QR Bottles</h3>
       <div style={{ display: "flex", gap: "15px", flexWrap: "wrap" }}>
+        {/* Single QR generator */}
         <button
           style={{ ...styles.button, backgroundColor: "#1565C0", color: "#fff" }}
           onClick={handleGenerateQR}
@@ -2095,6 +2158,7 @@ const renderQrManagement = () => (
           {loading ? "Generating..." : "Generate New QR"}
         </button>
 
+        {/* Assign bottles */}
         <button
           style={{ ...styles.button, backgroundColor: "#2E7D32", color: "#fff" }}
           onClick={() => setQrAssigning(true)}
@@ -2103,7 +2167,7 @@ const renderQrManagement = () => (
           Assign Bottles to Partner
         </button>
 
-        {/* ✅ Refresh both bottles + summary */}
+        {/* Refresh */}
         <button
           style={{ ...styles.button, backgroundColor: "#6A1B9A", color: "#fff" }}
           onClick={() => {
@@ -2114,6 +2178,36 @@ const renderQrManagement = () => (
           Refresh QR Data
         </button>
       </div>
+    </div>
+
+    {/* 🔹 🚀 NEW: Bulk QR Generator */}
+    <div style={styles.formCard}>
+      <h3 style={styles.cardTitle}>Bulk QR Generator</h3>
+
+      <label style={styles.reportLabel}>Enter quantity</label>
+      <input
+        type="number"
+        min="1"
+        value={bulkCount}
+        onChange={(e) => setBulkCount(Number(e.target.value))}
+        style={styles.textInput}
+        placeholder="e.g., 50"
+      />
+
+      <button
+        style={{ ...styles.button, backgroundColor: "#0277BD", color: "#fff", marginTop: 10 }}
+        onClick={handleBulkGenerateQR}
+        disabled={loadingBulk}
+      >
+        {loadingBulk ? "Generating..." : `Generate ${bulkCount} QR Codes`}
+      </button>
+
+      <button
+        style={{ ...styles.button, backgroundColor: "#FF6F00", color: "#fff", marginTop: 10 }}
+        onClick={handleDownloadBulkQR}
+      >
+        Download Bulk QR ZIP
+      </button>
     </div>
 
     {/* 🔹 QR Table */}
@@ -2140,15 +2234,8 @@ const renderQrManagement = () => (
               <tr key={bottle.UUID} style={styles.tableRow}>
                 <td style={styles.tableCell}>{bottle.UUID}</td>
 
-                {/* ✅ QR Image + Buttons + Code */}
                 <td style={styles.tableCell}>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                    }}
-                  >
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                     <QRCodeCanvas
                       id={`qr-${bottle.UUID}`}
                       value={bottle.qr_code}
@@ -2156,25 +2243,10 @@ const renderQrManagement = () => (
                       includeMargin={true}
                     />
 
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "6px",
-                        marginTop: "6px",
-                        borderTop: "1px solid #eee",
-                        paddingTop: "4px",
-                      }}
-                    >
-                      {/* 📋 Copy Button */}
+                    <div style={{ display: "flex", gap: "6px", marginTop: "6px", borderTop: "1px solid #eee", paddingTop: "4px" }}>
+                      {/* Copy */}
                       <button
-                        style={{
-                          fontSize: "11px",
-                          padding: "4px 6px",
-                          border: "1px solid #ccc",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          backgroundColor: "#f9f9f9",
-                        }}
+                        style={styles.qrSmallButton}
                         onClick={() => {
                           navigator.clipboard.writeText(bottle.qr_code);
                           alert("QR code copied: " + bottle.qr_code);
@@ -2183,99 +2255,31 @@ const renderQrManagement = () => (
                         📋 Copy
                       </button>
 
-                      {/* ⬇️ Download Button */}
-                      {/* ⬇️ Download Button with QR + Text in Image */}
+                      {/* Download */}
                       <button
-                        style={{
-                          fontSize: "11px",
-                          padding: "4px 6px",
-                          border: "1px solid #ccc",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          backgroundColor: "#f9f9f9",
-                        }}
-                        onClick={() => {
-                          const qrCanvas = document.getElementById(`qr-${bottle.UUID}`);
-                          const qrCodeText = bottle.qr_code;
-
-                          // Create a new canvas to combine QR + text
-                          const combinedCanvas = document.createElement("canvas");
-                          const ctx = combinedCanvas.getContext("2d");
-
-                          const qrSize = 100; // match your QR size
-                          const padding = 20;
-                          const textHeight = 20;
-                          const totalHeight = qrSize + textHeight + padding;
-
-                          combinedCanvas.width = qrSize + padding;
-                          combinedCanvas.height = totalHeight;
-
-                          // Draw white background
-                          ctx.fillStyle = "#fff";
-                          ctx.fillRect(0, 0, combinedCanvas.width, combinedCanvas.height);
-
-                          // Draw the QR image
-                          ctx.drawImage(qrCanvas, padding / 2, padding / 2, qrSize, qrSize);
-
-                          // Draw QR code text below
-                          ctx.fillStyle = "#000";
-                          ctx.font = "14px Arial";
-                          ctx.textAlign = "center";
-                          ctx.fillText(
-                            qrCodeText,
-                            combinedCanvas.width / 2,
-                            qrSize + textHeight
-                          );
-
-                          // Download combined image
-                          const pngUrl = combinedCanvas
-                            .toDataURL("image/png")
-                            .replace("image/png", "image/octet-stream");
-                          const downloadLink = document.createElement("a");
-                          downloadLink.href = pngUrl;
-                          downloadLink.download = `${bottle.qr_code}.png`;
-                          document.body.appendChild(downloadLink);
-                          downloadLink.click();
-                          document.body.removeChild(downloadLink);
-                        }}
+                        style={styles.qrSmallButton}
+                        onClick={() => downloadSingleQR(bottle)}
                       >
                         ⬇️ Download
                       </button>
-
                     </div>
 
-                    {/* ✅ Show QR Text Below for Manual Entry */}
-                    <p
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        marginTop: "6px",
-                        fontWeight: "500",
-                        wordBreak: "break-all",
-                        textAlign: "center",
-                      }}
-                    >
+                    <p style={{ fontSize: "13px", marginTop: "6px", fontWeight: "500", textAlign: "center" }}>
                       {bottle.qr_code}
                     </p>
                   </div>
                 </td>
 
-                {/* ✅ Selection Checkbox */}
                 <td style={styles.tableCell}>
                   <input
                     type="checkbox"
                     checked={selectedBottlesToAssign.includes(bottle.qr_code)}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedBottlesToAssign([
-                          ...selectedBottlesToAssign,
-                          bottle.qr_code,
-                        ]);
+                        setSelectedBottlesToAssign([...selectedBottlesToAssign, bottle.qr_code]);
                       } else {
                         setSelectedBottlesToAssign(
-                          selectedBottlesToAssign.filter(
-                            (code) => code !== bottle.qr_code
-                          )
+                          selectedBottlesToAssign.filter((code) => code !== bottle.qr_code)
                         );
                       }
                     }}
@@ -2289,6 +2293,7 @@ const renderQrManagement = () => (
     </div>
   </div>
 );
+
 
 
 
